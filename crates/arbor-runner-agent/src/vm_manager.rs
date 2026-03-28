@@ -412,3 +412,9 @@ async fn wait_for_guest_agent(mux: &SessionMux, timeout: Duration) -> Result<()>
         sleep(Duration::from_millis(200)).await;
     }
 }
+
+impl VmManager {
+    pub fn active_vm_count(&self) -> u32 {
+        self.vms.read().len() as u32
+    }
+}

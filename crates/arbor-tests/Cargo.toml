@@ -1,0 +1,24 @@
+[package]
+name    = "arbor-tests"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dev-dependencies]
+
+[dependencies]
+arbor-common        = { path = "../arbor-common" }
+arbor-controller    = { path = "../arbor-controller" }
+arbor-egress-proxy  = { path = "../arbor-egress-proxy" }
+serde_json          = { workspace = true }
+serde               = { workspace = true }
+uuid                = { workspace = true }
+chrono              = { workspace = true }
+anyhow              = { workspace = true }
+tokio               = { workspace = true }
+async-trait         = { workspace = true }
+sqlx             = { workspace = true }
+sha2             = { workspace = true }
+hex              = { workspace = true }
+parking_lot      = { workspace = true }
+rand             = { workspace = true }

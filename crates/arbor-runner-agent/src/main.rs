@@ -150,3 +150,18 @@ async fn destroy_vm(
         Err(e)  => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
+// Heartbeat task — registers with controller and sends periodic heartbeats
+
+async fn heartbeat_loop(controller_url: String, runner_id: uuid::Uuid, mgr: Arc<VmManager>) {
+    let client = reqwest::Client::new();
+    let url    = format!("{}/internal/runners/heartbeat", controller_url.trim_end_matches('/'));
+    let mut interval = tokio::time::interval(std::time::Duration::from_secs(15));
+    loop {
+        interval.tick().await;
+        let used = mgr.active_vm_count();
+        let _ = client.post(&url)
+            .json(&serde_json::json!({ "runner_id": runner_id, "used_slots": used }))
+            .send()
+            .await;
+    }
+}

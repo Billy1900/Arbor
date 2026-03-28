@@ -37,3 +37,4 @@ hyper        = { workspace = true }
 hyper-util   = { workspace = true }
 http-body-util = "0.1"
 libc           = "0.2"
+reqwest = { version = "=0.11.27", features = ["json"], default-features = false }

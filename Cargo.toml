@@ -8,6 +8,7 @@ members = [
     "crates/arbor-snapshot",
     "crates/arbor-egress-proxy",
     "crates/arbor-secret-broker",
+    "crates/arbor-tests",
 ]
 resolver = "2"
 
@@ -79,6 +80,8 @@ futures  = "0.3"
 async-trait = "0.1"
 once_cell   = "1"
 parking_lot = "0.12"
+metrics                     = "0.22"
+metrics-exporter-prometheus = "0.13"
 
 # Note: pin getrandom via dependency version constraint directly
 

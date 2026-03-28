@@ -31,3 +31,9 @@ futures           = { workspace = true }
 tokio-tungstenite = { workspace = true }
 tokio-vsock       = { workspace = true }
 bytes             = { workspace = true }
+arbor-snapshot      = { path = "../arbor-snapshot" }
+arbor-secret-broker = { path = "../arbor-secret-broker" }
+arbor-egress-proxy  = { path = "../arbor-egress-proxy" }
+
+metrics                     = { workspace = true }
+metrics-exporter-prometheus = { workspace = true }

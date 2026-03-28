@@ -1,0 +1,12 @@
+FROM rust:1.78-slim AS builder
+WORKDIR /build
+RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
+COPY Cargo.toml Cargo.lock ./
+COPY crates/ crates/
+COPY migrations/ migrations/
+RUN cargo build --release -p arbor-egress-proxy
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y ca-certificates libssl3 && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /build/target/release/arbor-egress-proxy /usr/local/bin/arbor-egress-proxy
+ENTRYPOINT ["/usr/local/bin/arbor-egress-proxy"]

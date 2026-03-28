@@ -25,3 +25,15 @@ hyper       = { workspace = true }
 hyper-util  = { workspace = true }
 bytes       = { workspace = true }
 http-body-util = "0.1"
+tokio-vsock = { workspace = true }
+object_store = { version = "0.7.1" }
+
+metrics                     = { workspace = true }
+metrics-exporter-prometheus = { workspace = true }
+arbor-egress-proxy  = { path = "../arbor-egress-proxy" }
+arbor-snapshot      = { path = "../arbor-snapshot" }
+
+[dev-dependencies]
+sha2  = { workspace = true }
+hex   = { workspace = true }
+tokio = { workspace = true }

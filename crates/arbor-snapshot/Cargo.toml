@@ -16,4 +16,4 @@ sha2         = { workspace = true }
 hex          = { workspace = true }
 bytes        = { workspace = true }
 futures      = { workspace = true }
-object_store = "0.7.1"
+object_store = { version = "0.7.1" }
