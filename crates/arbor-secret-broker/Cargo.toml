@@ -1,0 +1,16 @@
+[package]
+name    = "arbor-secret-broker"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+arbor-common = { path = "../arbor-common" }
+tokio        = { workspace = true }
+serde        = { workspace = true }
+serde_json   = { workspace = true }
+uuid         = { workspace = true }
+chrono       = { workspace = true }
+anyhow       = { workspace = true }
+tracing      = { workspace = true }
+sqlx         = { workspace = true }
+parking_lot  = { workspace = true }

@@ -1,0 +1,17 @@
+[package]
+name    = "arbor-common"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde      = { workspace = true }
+serde_json = { workspace = true }
+uuid       = { workspace = true }
+chrono     = { workspace = true }
+thiserror  = { workspace = true }
+anyhow     = { workspace = true }
+sha2       = { workspace = true }
+hex        = { workspace = true }
+bytes      = { workspace = true }
+sqlx      = { workspace = true }
+rand      = { workspace = true }

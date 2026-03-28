@@ -1,0 +1,136 @@
+services:
+
+  # ── PostgreSQL ─────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       arbor
+      POSTGRES_USER:     arbor
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-arbor_dev_only}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U arbor"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - arbor-internal
+
+  # ── MinIO (S3-compatible object store for snapshots) ──────────────────────
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER:     ${MINIO_ROOT_USER:-arbor}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-arbor_dev_only}
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9001:9001"   # MinIO console (dev only — remove in production)
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - arbor-internal
+
+  # ── arbor-api (control plane REST API) ─────────────────────────────────────
+  arbor-api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      ARBOR__DATABASE_URL:        postgresql://arbor:${POSTGRES_PASSWORD:-arbor_dev_only}@postgres:5432/arbor
+      ARBOR__BIND:                0.0.0.0:8080
+      ARBOR__API_BASE_URL:        ${ARBOR_API_BASE_URL:-http://localhost:8080}
+      ARBOR__ATTACH_TOKEN_SECRET: ${ATTACH_TOKEN_SECRET:-change-me-in-production}
+      ARBOR__KERNEL_PATH:         /var/lib/arbor/firecracker/vmlinux
+      ARBOR__DEFAULT_RUNNER_CLASS: fc-x86_64-v1
+      RUST_LOG:                   arbor_api=info,tower_http=info
+    ports:
+      - "8080:8080"
+    volumes:
+      - arbor_images:/var/lib/arbor/images:ro
+    networks:
+      - arbor-internal
+      - arbor-public
+
+  # ── arbor-egress-proxy ─────────────────────────────────────────────────────
+  arbor-egress-proxy:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.egress-proxy
+    restart: unless-stopped
+    environment:
+      ARBOR_PROXY_BIND: 0.0.0.0:3128
+      RUST_LOG:         arbor_egress_proxy=info
+    ports:
+      - "3128:3128"   # Only exposed to runner network in production
+    networks:
+      - arbor-internal
+      - arbor-vm-egress
+
+  # ── arbor-runner-agent (runs on bare-metal KVM host, not in container) ─────
+  # In production the runner-agent runs directly on the KVM host as a systemd service.
+  # This container is for local development / CI only (no real Firecracker).
+  arbor-runner-agent-dev:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.runner-agent
+    restart: unless-stopped
+    privileged: true    # Required for KVM and netns in dev; scoped in production
+    depends_on:
+      - arbor-api
+    environment:
+      ARBOR_RUNNER__BIND:             0.0.0.0:9090
+      ARBOR_RUNNER__FC_BINARY:        /var/lib/arbor/firecracker/bin/firecracker
+      ARBOR_RUNNER__JAILER_BINARY:    /var/lib/arbor/firecracker/bin/jailer
+      ARBOR_RUNNER__KERNEL_PATH:      /var/lib/arbor/firecracker/vmlinux
+      ARBOR_RUNNER__WORKSPACES_DIR:   /var/lib/arbor/workspaces
+      ARBOR_RUNNER__BASE_IMAGES_DIR:  /var/lib/arbor/images
+      RUST_LOG:                       arbor_runner_agent=debug
+    volumes:
+      - /dev/kvm:/dev/kvm               # KVM device passthrough
+      - arbor_workspaces:/var/lib/arbor/workspaces
+      - arbor_images:/var/lib/arbor/images:ro
+      - arbor_snapshots:/var/lib/arbor/snapshots
+      - firecracker_bins:/var/lib/arbor/firecracker:ro
+    ports:
+      - "9090:9090"
+    networks:
+      - arbor-internal
+    cap_add:
+      - NET_ADMIN
+      - SYS_ADMIN
+
+volumes:
+  postgres_data:
+  minio_data:
+  arbor_images:
+  arbor_workspaces:
+  arbor_snapshots:
+  firecracker_bins:
+
+networks:
+  arbor-internal:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.100.0.0/24
+  arbor-public:
+    driver: bridge
+  arbor-vm-egress:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.101.0.0/24

@@ -1,0 +1,89 @@
+[workspace]
+members = [
+    "crates/arbor-common",
+    "crates/arbor-controller",
+    "crates/arbor-api",
+    "crates/arbor-runner-agent",
+    "crates/arbor-guest-agent",
+    "crates/arbor-snapshot",
+    "crates/arbor-egress-proxy",
+    "crates/arbor-secret-broker",
+]
+resolver = "2"
+
+[workspace.dependencies]
+# Async runtime
+tokio       = { version = "1.37", features = ["full"] }
+tokio-util  = { version = "0.7", features = ["codec"] }
+
+# Web / API
+axum              = { version = "0.7", features = ["ws", "macros"] }
+axum-extra        = { version = "0.9", features = ["typed-header"] }
+tower             = { version = "0.4", features = ["full"] }
+tower-http        = { version = "0.5", features = ["trace", "cors", "timeout"] }
+hyper             = { version = "1", features = ["full"] }
+hyper-util        = { version = "0.1", features = ["full"] }
+tungstenite       = { version = "=0.20.1" }
+tokio-tungstenite = { version = "=0.20.1" }
+
+# Serialization
+serde      = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Database
+sqlx = { version = "0.7", features = [
+    "runtime-tokio-rustls", "postgres", "uuid", "chrono", "json", "migrate"
+] }
+
+# Crypto / IDs
+uuid      = { version = "=1.10.0", features = ["v4", "serde"] }
+chrono    = { version = "0.4", features = ["serde"] }
+sha2      = "0.10"
+hex       = "0.4"
+rand      = "=0.8.5"
+getrandom = "=0.2.15"
+jsonwebtoken = "9"
+
+# TLS
+rustls         = "0.23"
+rustls-pemfile = "2"
+tokio-rustls   = "0.26"
+
+# Error handling
+anyhow    = "1"
+thiserror = "1"
+
+# Logging / Tracing
+tracing            = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Config
+config  = "0.14"
+dotenvy = "0.15"
+
+# HTTP client - use hyper directly (reqwest 0.11/0.12 pull icu4x 2.x via url/idna on Rust 1.75)
+# reqwest is added back per-crate for production builds on Rust 1.82+
+
+# Linux syscalls
+nix = { version = "0.29", features = ["net", "socket", "process", "fs", "mount", "sched", "user", "signal"] }
+
+# vsock
+tokio-vsock = "0.5"
+
+# PTY
+portable-pty = "0.8"
+
+# Misc
+bytes    = "1"
+futures  = "0.3"
+async-trait = "0.1"
+once_cell   = "1"
+parking_lot = "0.12"
+
+# Note: pin getrandom via dependency version constraint directly
+
+[profile.release]
+opt-level     = 3
+lto           = "thin"
+codegen-units = 1
+panic         = "abort"

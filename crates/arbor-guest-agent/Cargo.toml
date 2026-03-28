@@ -1,0 +1,29 @@
+[package]
+name    = "arbor-guest-agent"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "arbor-guest-agent"
+path = "src/main.rs"
+
+# Build with: cargo build --release --target x86_64-unknown-linux-musl
+# The resulting binary goes into the rootfs at /usr/local/bin/arbor-guest-agent
+
+[dependencies]
+arbor-common = { path = "../arbor-common" }
+
+tokio        = { workspace = true }
+tokio-vsock  = { workspace = true }
+portable-pty = { workspace = true }
+serde        = { workspace = true }
+serde_json   = { workspace = true }
+uuid         = { workspace = true }
+anyhow       = { workspace = true }
+tracing      = { workspace = true }
+tracing-subscriber = { workspace = true }
+futures      = { workspace = true }
+bytes        = { workspace = true }
+parking_lot  = { workspace = true }
+nix          = { workspace = true }
+libc           = "0.2"
