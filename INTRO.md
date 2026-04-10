@@ -16,6 +16,22 @@ Key distinction from cloud compute: These are purpose-built for agent use cases,
 - Dedicated sandbox providers like Docker, E2B, Modal, Northflank, and Firecrawl's Browser Sandbox are competing heavily on startup speed, isolation quality, developer experience, and what tooling comes pre-loaded. Agent sandboxing is becoming a distinct category, not just a framework feature.
 - Whenever you start a new coding session, you want to spin up a new sandbox that has a full development environment. This will allow the agent to work effectively, by having access to all the tools a human would have, while also being isolated from other work. It’s also crucial that time-to-first-token is as fast as possible.
 
+### The problem Arbor solves
+
+When you run a coding agent on a real repository, three things keep going wrong:
+
+**1. Agents can't safely experiment in parallel.**
+If you want to try three different approaches to fixing a bug, you need three isolated environments. Spinning up three fresh VMs from scratch wastes minutes and gigabytes. Existing snapshot tools let you restore a checkpoint — but they don't handle what happens when you restore the *same* snapshot three times. All three copies share the same SSH keys, session tokens, PRNG seeds, and Docker layer cache state. They'll silently collide.
+
+**2. Secrets end up inside the VM.**
+The standard pattern — inject an `OPENAI_API_KEY` environment variable into the sandbox — means the agent can read, log, and exfiltrate credentials. An agent executing arbitrary code in a compromised dependency has full access to every secret in its environment.
+
+**3. You can't run this on your own infrastructure.**
+Every existing coding sandbox is SaaS-only. If your codebase is proprietary, your compliance team won't let agent traffic touch a third-party cloud. There is no self-hosted option that gives you microVM isolation, checkpoint/restore, and proper secret handling in one coherent system.
+
+Arbor is the answer to all three.
+
+
 ### Different types of sandbox
 - There are three main categories of sandboxing: browser sandboxes, code execution sandboxes, and full dev environment sandboxes.
   - For agents that browse the web: Firecrawl Browser Sandbox
