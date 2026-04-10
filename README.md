@@ -1,6 +1,6 @@
 # Arbor
 
-**Branch-native coding workspace infrastructure for autonomous AI agents.**
+**Branch-native sandboxes for AI agent team. Fork state. Restore anywhere. Leak nothing.**
 
 Arbor provides microVM-isolated workspaces that coding agents can run real builds in, checkpoint at any moment, fork into parallel branches, and restore safely — all within your own VPC. Think of it as the infrastructure layer that makes multi-agent experimentation safe and reproducible.
 
