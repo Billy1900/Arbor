@@ -1,0 +1,1088 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Arbor — Branch-Native Agent Sandboxes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:       #0a0c0f;
+    --bg2:      #0f1217;
+    --bg3:      #151a22;
+    --border:   #1e2733;
+    --border2:  #2a3444;
+    --text:     #e2e8f0;
+    --muted:    #64748b;
+    --faint:    #1e2733;
+    --green:    #00d68f;
+    --green-d:  #00a36c;
+    --green-bg: #001a12;
+    --amber:    #f59e0b;
+    --blue:     #38bdf8;
+    --red:      #f87171;
+    --mono:     'IBM Plex Mono', monospace;
+    --sans:     'IBM Plex Sans', sans-serif;
+  }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.6;
+    overflow-x: hidden;
+  }
+
+  /* ── grid overlay ── */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(0,214,143,0.025) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,214,143,0.025) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* ── nav ── */
+  nav {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    background: rgba(10,12,15,0.92);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+    padding: 0 2rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 56px;
+  }
+
+  .nav-logo {
+    font-family: var(--mono);
+    font-weight: 600;
+    font-size: 18px;
+    color: var(--green);
+    letter-spacing: -0.5px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .nav-logo span { color: var(--muted); font-weight: 400; }
+
+  .nav-links { display: flex; gap: 2rem; }
+  .nav-links a {
+    font-size: 13px;
+    color: var(--muted);
+    text-decoration: none;
+    font-family: var(--mono);
+    transition: color 0.15s;
+  }
+  .nav-links a:hover { color: var(--text); }
+
+  .nav-cta {
+    background: var(--green-bg);
+    border: 1px solid var(--green-d);
+    color: var(--green);
+    padding: 6px 16px;
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    text-decoration: none;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .nav-cta:hover { background: rgba(0,214,143,0.1); border-color: var(--green); }
+
+  /* ── sections ── */
+  section {
+    position: relative;
+    z-index: 1;
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 0 2rem;
+  }
+
+  /* ── hero ── */
+  .hero {
+    padding: 100px 2rem 80px;
+    max-width: 1100px;
+    margin: 0 auto;
+    position: relative;
+    z-index: 1;
+  }
+
+  .hero-label {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--green);
+    margin-bottom: 1.5rem;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .hero-label::before {
+    content: '';
+    display: inline-block;
+    width: 24px;
+    height: 1px;
+    background: var(--green);
+  }
+
+  h1 {
+    font-size: clamp(2.5rem, 5vw, 4rem);
+    font-weight: 300;
+    line-height: 1.1;
+    letter-spacing: -0.03em;
+    color: var(--text);
+    margin-bottom: 1.5rem;
+  }
+
+  h1 em {
+    font-style: normal;
+    color: var(--green);
+    font-weight: 500;
+  }
+
+  .hero-sub {
+    font-size: 1.1rem;
+    color: var(--muted);
+    max-width: 600px;
+    margin-bottom: 2.5rem;
+    line-height: 1.7;
+    font-weight: 300;
+  }
+
+  .hero-actions { display: flex; gap: 1rem; flex-wrap: wrap; align-items: center; }
+
+  .btn-primary {
+    background: var(--green);
+    color: #000;
+    padding: 10px 24px;
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 600;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    transition: opacity 0.15s;
+  }
+  .btn-primary:hover { opacity: 0.85; }
+
+  .btn-ghost {
+    background: transparent;
+    border: 1px solid var(--border2);
+    color: var(--text);
+    padding: 10px 24px;
+    font-family: var(--mono);
+    font-size: 13px;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    transition: border-color 0.15s, color 0.15s;
+  }
+  .btn-ghost:hover { border-color: var(--muted); }
+
+  /* ── code hero block ── */
+  .hero-code {
+    margin-top: 4rem;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    padding: 0;
+    overflow: hidden;
+  }
+
+  .code-header {
+    background: var(--bg3);
+    border-bottom: 1px solid var(--border);
+    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  .code-dots { display: flex; gap: 6px; }
+  .code-dots span {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: var(--border2);
+  }
+
+  pre {
+    padding: 1.5rem;
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.7;
+    overflow-x: auto;
+    color: var(--text);
+  }
+
+  .kw { color: var(--blue); }
+  .fn-name { color: var(--green); }
+  .str { color: var(--amber); }
+  .cm { color: var(--muted); }
+  .op { color: var(--red); }
+  .type { color: #c084fc; }
+
+  /* ── divider ── */
+  .divider {
+    height: 1px;
+    background: var(--border);
+    margin: 5rem 2rem;
+    max-width: 1100px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  /* ── section label ── */
+  .section-label {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 1rem;
+  }
+
+  /* ── features ── */
+  .features-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 1px;
+    background: var(--border);
+    border: 1px solid var(--border);
+    margin-top: 3rem;
+  }
+
+  .feature-card {
+    background: var(--bg);
+    padding: 2rem;
+    transition: background 0.2s;
+  }
+  .feature-card:hover { background: var(--bg2); }
+
+  .feature-icon {
+    width: 36px;
+    height: 36px;
+    background: var(--green-bg);
+    border: 1px solid var(--green-d);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 1.25rem;
+    font-family: var(--mono);
+    font-size: 14px;
+    color: var(--green);
+    font-weight: 600;
+  }
+
+  .feature-title {
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--text);
+    margin-bottom: 0.6rem;
+    font-family: var(--mono);
+  }
+
+  .feature-body {
+    font-size: 14px;
+    color: var(--muted);
+    line-height: 1.65;
+  }
+
+  /* ── architecture diagram ── */
+  .arch-diagram {
+    margin-top: 3rem;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    padding: 2rem;
+    overflow-x: auto;
+  }
+
+  .arch-row {
+    display: flex;
+    gap: 1px;
+    background: var(--border);
+    margin-bottom: 1px;
+  }
+
+  .arch-box {
+    background: var(--bg3);
+    padding: 1rem 1.25rem;
+    flex: 1;
+    min-width: 120px;
+  }
+
+  .arch-box.highlight {
+    background: var(--green-bg);
+    border-bottom: 2px solid var(--green-d);
+  }
+
+  .arch-box-label {
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text);
+    margin-bottom: 4px;
+  }
+
+  .arch-box.highlight .arch-box-label { color: var(--green); }
+
+  .arch-box-sub {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--muted);
+    line-height: 1.5;
+  }
+
+  .arch-arrow {
+    text-align: center;
+    padding: 0.5rem 0;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--border2);
+  }
+
+  /* ── comparison table ── */
+  .compare-wrap {
+    margin-top: 3rem;
+    overflow-x: auto;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--mono);
+    font-size: 13px;
+    border: 1px solid var(--border);
+  }
+
+  thead tr { background: var(--bg3); }
+
+  th {
+    padding: 12px 16px;
+    text-align: left;
+    font-weight: 500;
+    color: var(--muted);
+    font-size: 11px;
+    letter-spacing: 0.05em;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+
+  th.arbor-col {
+    color: var(--green);
+    background: var(--green-bg);
+  }
+
+  td {
+    padding: 11px 16px;
+    border-bottom: 1px solid var(--faint);
+    color: var(--muted);
+    white-space: nowrap;
+  }
+
+  td.feature-name {
+    color: var(--text);
+    font-size: 12px;
+  }
+
+  td.arbor-col {
+    background: rgba(0,214,143,0.03);
+    color: var(--text);
+  }
+
+  .check { color: var(--green); }
+  .cross { color: #334155; }
+  .partial { color: var(--amber); }
+
+  tr:last-child td { border-bottom: none; }
+
+  /* ── fork flow ── */
+  .fork-flow {
+    margin-top: 3rem;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    padding: 2rem;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.9;
+    color: var(--text);
+    overflow-x: auto;
+  }
+
+  .fork-comment { color: var(--muted); }
+  .fork-green { color: var(--green); }
+  .fork-amber { color: var(--amber); }
+  .fork-blue { color: var(--blue); }
+  .fork-indent { padding-left: 2.5rem; }
+  .fork-indent2 { padding-left: 5rem; }
+
+  /* ── reseal steps ── */
+  .reseal-steps {
+    margin-top: 2rem;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1px;
+    background: var(--border);
+    border: 1px solid var(--border);
+  }
+
+  .reseal-step {
+    background: var(--bg);
+    padding: 1.25rem;
+  }
+
+  .step-num {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--green-d);
+    margin-bottom: 6px;
+  }
+
+  .step-title {
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text);
+    margin-bottom: 4px;
+  }
+
+  .step-body {
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  /* ── security callout ── */
+  .security-callout {
+    margin-top: 3rem;
+    background: var(--bg2);
+    border-left: 3px solid var(--green-d);
+    padding: 1.5rem 2rem;
+  }
+
+  .security-callout p {
+    font-size: 13.5px;
+    color: var(--muted);
+    line-height: 1.75;
+    font-family: var(--mono);
+  }
+
+  .security-callout strong { color: var(--text); font-weight: 500; }
+
+  /* ── roadmap ── */
+  .roadmap {
+    margin-top: 3rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    background: var(--border);
+    border: 1px solid var(--border);
+  }
+
+  .roadmap-item {
+    background: var(--bg);
+    padding: 1rem 1.5rem;
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    transition: background 0.15s;
+  }
+  .roadmap-item:hover { background: var(--bg2); }
+
+  .milestone {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--muted);
+    width: 28px;
+    flex-shrink: 0;
+  }
+
+  .roadmap-title {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--text);
+    flex: 1;
+  }
+
+  .status-badge {
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 600;
+    padding: 3px 8px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .status-done { background: var(--green-bg); color: var(--green-d); border: 1px solid var(--green-d); }
+  .status-wip  { background: rgba(245,158,11,0.1); color: var(--amber); border: 1px solid var(--amber); }
+  .status-plan { background: var(--faint); color: var(--muted); border: 1px solid var(--border2); }
+
+  /* ── get started ── */
+  .get-started {
+    margin: 5rem auto 0;
+    max-width: 1100px;
+    padding: 0 2rem 6rem;
+    position: relative;
+    z-index: 1;
+  }
+
+  .get-started h2 {
+    font-size: 2rem;
+    font-weight: 300;
+    letter-spacing: -0.02em;
+    margin-bottom: 2rem;
+    color: var(--text);
+  }
+
+  .get-started h2 em {
+    font-style: normal;
+    color: var(--green);
+    font-weight: 500;
+  }
+
+  .install-steps {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1rem;
+    margin-top: 2rem;
+  }
+
+  .install-step {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    padding: 1.5rem;
+  }
+
+  .install-step-num {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--green-d);
+    letter-spacing: 0.1em;
+    margin-bottom: 0.75rem;
+  }
+
+  .install-step h4 {
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text);
+    margin-bottom: 0.75rem;
+  }
+
+  .install-step code {
+    display: block;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    background: var(--bg3);
+    padding: 10px 12px;
+    line-height: 1.7;
+    border: 1px solid var(--faint);
+  }
+
+  /* ── footer ── */
+  footer {
+    border-top: 1px solid var(--border);
+    padding: 2rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: gap;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    position: relative;
+    z-index: 1;
+  }
+
+  footer a { color: var(--muted); text-decoration: none; }
+  footer a:hover { color: var(--text); }
+
+  .footer-links { display: flex; gap: 1.5rem; flex-wrap: wrap; }
+
+  /* ── scroll animations ── */
+  .fade-in {
+    opacity: 0;
+    transform: translateY(20px);
+    transition: opacity 0.5s ease, transform 0.5s ease;
+  }
+  .fade-in.visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  /* ── crate badges ── */
+  .crates-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 2rem;
+  }
+
+  .crate-badge {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 500;
+    padding: 5px 12px;
+    background: var(--bg3);
+    border: 1px solid var(--border2);
+    color: var(--text);
+    white-space: nowrap;
+  }
+
+  .crate-badge .crate-role {
+    color: var(--muted);
+    font-weight: 400;
+  }
+
+  /* ── responsive ── */
+  @media (max-width: 640px) {
+    .nav-links { display: none; }
+    h1 { font-size: 2rem; }
+    .hero { padding: 60px 1.5rem 50px; }
+    section { padding: 0 1.5rem; }
+    .divider { margin: 3rem 1.5rem; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ── nav ── -->
+<nav>
+  <div class="nav-logo">arbor<span>/</span></div>
+  <div class="nav-links">
+    <a href="#features">features</a>
+    <a href="#architecture">architecture</a>
+    <a href="#compare">compare</a>
+    <a href="#roadmap">roadmap</a>
+    <a href="#start">get started</a>
+  </div>
+  <a class="nav-cta" href="https://github.com/Billy1900/Arbor">GitHub →</a>
+</nav>
+
+<!-- ── hero ── -->
+<div class="hero">
+  <div class="hero-label">agent infrastructure · built in rust</div>
+  <h1>Fork execution state.<br>Restore <em>anywhere</em>.<br>Leak nothing.</h1>
+  <p class="hero-sub">Arbor gives AI agent teams microVM-isolated workspaces they can snapshot mid-task, fork into parallel branches, and restore safely — all inside your own VPC. The only sandbox where branching is a first-class primitive.</p>
+  <div class="hero-actions">
+    <a class="btn-primary" href="#start">Get started →</a>
+    <a class="btn-ghost" href="https://github.com/Billy1900/Arbor">View on GitHub</a>
+  </div>
+
+  <div class="hero-code fade-in">
+    <div class="code-header">
+      <div class="code-dots"><span></span><span></span><span></span></div>
+      <span>parallel_migration.rs</span>
+    </div>
+    <pre><span class="cm">// Set up a workspace, snapshot before the risky migration,</span>
+<span class="cm">// then fork three parallel agents to try different approaches.</span>
+
+<span class="kw">let</span> workspace = <span class="type">Arbor</span>::<span class="fn-name">new</span>().await?;
+workspace.<span class="fn-name">run</span>(<span class="str">"git clone git@github.com:acme/monorepo.git ."</span>).await?;
+
+<span class="kw">let</span> checkpoint = workspace.<span class="fn-name">snapshot</span>(<span class="str">"before-migration"</span>).await?;
+
+<span class="cm">// Three isolated worlds. None can observe or interfere with each other.</span>
+<span class="kw">let</span> postgres = checkpoint.<span class="fn-name">fork</span>(<span class="str">"postgres-migration"</span>).await?;
+<span class="kw">let</span> redis    = checkpoint.<span class="fn-name">fork</span>(<span class="str">"redis-approach"</span>).await?;
+<span class="kw">let</span> skip     = checkpoint.<span class="fn-name">fork</span>(<span class="str">"skip-migration"</span>).await?;
+
+<span class="cm">// Each fork: quarantined → identity resealed → credentials re-issued → READY</span>
+<span class="kw">let</span> results = <span class="fn-name">join_all</span>([
+    postgres.<span class="fn-name">run</span>(<span class="str">"cargo test --test integration"</span>),
+    redis.<span class="fn-name">run</span>(<span class="str">"cargo test --test integration"</span>),
+    skip.<span class="fn-name">run</span>(<span class="str">"cargo test --test integration"</span>),
+]).await;</pre>
+  </div>
+</div>
+
+<!-- ── features ── -->
+<section id="features">
+  <div class="section-label fade-in">// core differentiators</div>
+  <div class="features-grid fade-in">
+    <div class="feature-card">
+      <div class="feature-icon">01</div>
+      <div class="feature-title">branch-safe restore</div>
+      <p class="feature-body">Firecracker warns that restoring the same checkpoint twice gives both VMs identical PRNG seeds, token caches, and SSH state. Arbor solves this with a quarantine + reseal protocol enforced at the infrastructure level — no application coordination required.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">02</div>
+      <div class="feature-title">vpc-first credentials</div>
+      <p class="feature-body">The VM never receives your API keys. The host-side egress proxy injects credentials at the network boundary. Agents see <code>OPENAI_API_KEY=arbor-brokered</code>. Prompt injection, supply chain attacks, and environment leaks are structurally impossible.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">03</div>
+      <div class="feature-title">checkpoint dag</div>
+      <p class="feature-body">Every checkpoint records its parent, forming a DAG of execution history. Fork three agents from the same pre-migration state, let them explore in parallel, and merge the winner — without any of them observing each other.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">04</div>
+      <div class="feature-title">default-deny egress</div>
+      <p class="feature-body">Each workspace lives in its own Linux network namespace. The only route out is through the host-side proxy. Egress is physically impossible to bypass — there's no route, not just a rule. nftables enforces the allowlist at the kernel level.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">05</div>
+      <div class="feature-title">self-hostable</div>
+      <p class="feature-body">The entire control plane, runner pool, and egress proxy run inside your VPC. Code, secrets, and agent activity never leave your network. This is the deployment model — not an enterprise add-on. Docker Compose up in under five minutes.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">06</div>
+      <div class="feature-title">sub-150ms boot</div>
+      <p class="feature-body">Built on Firecracker, the same microVM technology AWS uses for Lambda. Full VM isolation — not containers — with boot times competitive with container startups. Firecracker's Jailer provides an additional seccomp/cgroup isolation layer.</p>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ── architecture ── -->
+<section id="architecture">
+  <div class="section-label fade-in">// architecture</div>
+
+  <div class="arch-diagram fade-in">
+    <div style="font-family: var(--mono); font-size: 11px; color: var(--muted); margin-bottom: 1.5rem; letter-spacing: 0.05em;">THREE-LAYER ISOLATION</div>
+
+    <!-- Layer 1 -->
+    <div style="font-family: var(--mono); font-size: 10px; color: var(--muted); margin-bottom: 4px; letter-spacing: 0.08em;">LAYER 1 — AGENT API</div>
+    <div class="arch-row" style="margin-bottom: 1.5rem;">
+      <div class="arch-box highlight" style="flex: 2;">
+        <div class="arch-box-label">arbor-api</div>
+        <div class="arch-box-sub">REST · WebSocket PTY · axum</div>
+      </div>
+      <div class="arch-box highlight" style="flex: 2;">
+        <div class="arch-box-label">arbor-controller</div>
+        <div class="arch-box-sub">State machine · Fork · Reseal · sqlx/postgres</div>
+      </div>
+    </div>
+
+    <div class="arch-arrow">↓ workspace operations ↓</div>
+
+    <!-- Layer 2 -->
+    <div style="font-family: var(--mono); font-size: 10px; color: var(--muted); margin: 1rem 0 4px; letter-spacing: 0.08em;">LAYER 2 — PER-BRANCH EXECUTION</div>
+    <div class="arch-row" style="margin-bottom: 1.5rem;">
+      <div class="arch-box">
+        <div class="arch-box-label">Branch A</div>
+        <div class="arch-box-sub">arbor-runner-agent<br>Firecracker + Jailer<br>vsock mux</div>
+      </div>
+      <div class="arch-box">
+        <div class="arch-box-label">Branch B</div>
+        <div class="arch-box-sub">arbor-runner-agent<br>Firecracker + Jailer<br>vsock mux</div>
+      </div>
+      <div class="arch-box">
+        <div class="arch-box-label">Branch C</div>
+        <div class="arch-box-sub">arbor-runner-agent<br>Firecracker + Jailer<br>vsock mux</div>
+      </div>
+    </div>
+
+    <div class="arch-arrow">↓ host isolation ↓</div>
+
+    <!-- Layer 3 -->
+    <div style="font-family: var(--mono); font-size: 10px; color: var(--muted); margin: 1rem 0 4px; letter-spacing: 0.08em;">LAYER 3 — HOST CONTROLS</div>
+    <div class="arch-row">
+      <div class="arch-box">
+        <div class="arch-box-label">arbor-egress-proxy</div>
+        <div class="arch-box-sub">Allowlist · Credential injection · hyper</div>
+      </div>
+      <div class="arch-box">
+        <div class="arch-box-label">arbor-snapshot</div>
+        <div class="arch-box-sub">Checkpoint DAG · S3/MinIO · sha256</div>
+      </div>
+      <div class="arch-box">
+        <div class="arch-box-label">arbor-secret-broker</div>
+        <div class="arch-box-sub">Grant lifecycle · Vault integration</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="crates-list fade-in">
+    <div class="crate-badge">arbor-api <span class="crate-role">— REST + WebSocket</span></div>
+    <div class="crate-badge">arbor-controller <span class="crate-role">— state machine</span></div>
+    <div class="crate-badge">arbor-runner-agent <span class="crate-role">— VM lifecycle</span></div>
+    <div class="crate-badge">arbor-guest-agent <span class="crate-role">— musl binary in VM</span></div>
+    <div class="crate-badge">arbor-snapshot <span class="crate-role">— checkpoint manifests</span></div>
+    <div class="crate-badge">arbor-egress-proxy <span class="crate-role">— CONNECT proxy</span></div>
+    <div class="crate-badge">arbor-secret-broker <span class="crate-role">— grant lifecycle</span></div>
+    <div class="crate-badge">arbor-common <span class="crate-role">— shared types</span></div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ── fork / reseal detail ── -->
+<section>
+  <div class="section-label fade-in">// how fork safety works</div>
+
+  <div class="fork-flow fade-in">
+<span class="fork-comment">// Every fork goes through quarantine + reseal before READY.</span>
+<span class="fork-comment">// Enforced at infrastructure level. Zero app coordination needed.</span>
+
+<span class="fork-green">fork</span>(checkpoint_id)
+<span class="fork-indent">└─ new VM boots in <span class="fork-amber">QUARANTINED</span> state</span>
+<span class="fork-indent2">├─ all egress blocked</span>
+<span class="fork-indent2">├─ all attach tokens invalidated</span>
+<span class="fork-indent2">└─ reseal hook chain runs:</span>
+<span class="fork-indent2">    1. bump identity_epoch  → new VM identity</span>
+<span class="fork-indent2">    2. rotate session tokens</span>
+<span class="fork-indent2">    3. re-sign preview URLs</span>
+<span class="fork-indent2">    4. revoke + re-issue secret grants</span>
+<span class="fork-indent2">    5. re-seed guest entropy via vsock</span>
+<span class="fork-indent2">    ──────────────────────────────</span>
+<span class="fork-indent2">    state → <span class="fork-green">READY</span></span>
+  </div>
+
+  <div class="reseal-steps fade-in">
+    <div class="reseal-step">
+      <div class="step-num">STEP 01</div>
+      <div class="step-title">identity epoch</div>
+      <p class="step-body">Each fork gets a new identity epoch, preventing session tokens from crossing workspace boundaries.</p>
+    </div>
+    <div class="reseal-step">
+      <div class="step-num">STEP 02</div>
+      <div class="step-title">token rotation</div>
+      <p class="step-body">All attach tokens from the parent snapshot are invalidated. New tokens are issued for the forked workspace only.</p>
+    </div>
+    <div class="reseal-step">
+      <div class="step-num">STEP 03</div>
+      <div class="step-title">grant re-issue</div>
+      <p class="step-body">Secret grants are revoked and re-issued with fresh IDs. The egress proxy registry is updated atomically.</p>
+    </div>
+    <div class="reseal-step">
+      <div class="step-num">STEP 04</div>
+      <div class="step-title">entropy reseed</div>
+      <p class="step-body">Guest PRNG is re-seeded via vsock, eliminating the shared-entropy correctness bug Firecracker warns about.</p>
+    </div>
+  </div>
+
+  <div class="security-callout fade-in">
+    <p><strong>On credential brokering:</strong> when an agent calls api.openai.com, traffic flows: agent process → VM netns (blocked by default) → host TAP device → arbor-egress-proxy → allowlist check → credential injection → upstream. <strong>The VM never receives the credential value.</strong> Even if the agent logs its environment, leaks it to a supply-chain compromise, or is manipulated by prompt injection — the real key was never there.</p>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ── compare ── -->
+<section id="compare">
+  <div class="section-label fade-in">// how it compares</div>
+
+  <div class="compare-wrap fade-in">
+    <table>
+      <thead>
+        <tr>
+          <th>Feature</th>
+          <th class="arbor-col">Arbor</th>
+          <th>E2B</th>
+          <th>Docker Sandboxes</th>
+          <th>Modal</th>
+          <th>Daytona</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="feature-name">VM-level isolation</td>
+          <td class="arbor-col"><span class="check">✓</span> Firecracker</td>
+          <td><span class="check">✓</span> Firecracker</td>
+          <td><span class="cross">—</span></td>
+          <td><span class="cross">—</span> container</td>
+          <td><span class="cross">—</span> mixed</td>
+        </tr>
+        <tr>
+          <td class="feature-name">Fork from checkpoint</td>
+          <td class="arbor-col"><span class="check">✓</span> first-class API</td>
+          <td><span class="cross">✗</span></td>
+          <td><span class="cross">✗</span></td>
+          <td><span class="cross">✗</span></td>
+          <td><span class="cross">✗</span></td>
+        </tr>
+        <tr>
+          <td class="feature-name">Branch-safe restore</td>
+          <td class="arbor-col"><span class="check">✓</span> <strong>unique</strong></td>
+          <td><span class="cross">✗</span></td>
+          <td><span class="cross">✗</span></td>
+          <td><span class="cross">✗</span></td>
+          <td><span class="cross">✗</span></td>
+        </tr>
+        <tr>
+          <td class="feature-name">Credential brokering</td>
+          <td class="arbor-col"><span class="check">✓</span> host-side proxy</td>
+          <td><span class="cross">✗</span></td>
+          <td><span class="partial">~</span> partial</td>
+          <td><span class="cross">✗</span></td>
+          <td><span class="cross">✗</span></td>
+        </tr>
+        <tr>
+          <td class="feature-name">Default-deny egress</td>
+          <td class="arbor-col"><span class="check">✓</span></td>
+          <td><span class="partial">~</span> partial</td>
+          <td><span class="check">✓</span></td>
+          <td><span class="cross">✗</span></td>
+          <td><span class="cross">✗</span></td>
+        </tr>
+        <tr>
+          <td class="feature-name">Self-host / VPC-first</td>
+          <td class="arbor-col"><span class="check">✓</span> <strong>first-class</strong></td>
+          <td><span class="cross">✗</span> SaaS only</td>
+          <td><span class="cross">✗</span> SaaS only</td>
+          <td><span class="cross">✗</span> SaaS only</td>
+          <td><span class="check">✓</span></td>
+        </tr>
+        <tr>
+          <td class="feature-name">Sub-150ms boot</td>
+          <td class="arbor-col"><span class="check">✓</span></td>
+          <td><span class="check">✓</span></td>
+          <td><span class="cross">✗</span></td>
+          <td><span class="check">✓</span></td>
+          <td><span class="cross">✗</span></td>
+        </tr>
+        <tr>
+          <td class="feature-name">Open source</td>
+          <td class="arbor-col"><span class="check">✓</span> MIT / Rust</td>
+          <td><span class="partial">~</span> SDK only</td>
+          <td><span class="cross">✗</span></td>
+          <td><span class="cross">✗</span></td>
+          <td><span class="check">✓</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ── roadmap ── -->
+<section id="roadmap">
+  <div class="section-label fade-in">// roadmap</div>
+
+  <div class="roadmap fade-in">
+    <div class="roadmap-item">
+      <div class="milestone">M1</div>
+      <div class="roadmap-title">Single-node create / exec / terminate</div>
+      <div class="status-badge status-done">complete</div>
+    </div>
+    <div class="roadmap-item">
+      <div class="milestone">M2</div>
+      <div class="roadmap-title">Guest rootfs + private Docker daemon</div>
+      <div class="status-badge status-done">complete</div>
+    </div>
+    <div class="roadmap-item">
+      <div class="milestone">M3</div>
+      <div class="roadmap-title">Full VM checkpoint + S3 upload</div>
+      <div class="status-badge status-done">complete</div>
+    </div>
+    <div class="roadmap-item">
+      <div class="milestone">M4</div>
+      <div class="roadmap-title">Branch-safe fork: quarantine + reseal</div>
+      <div class="status-badge status-done">complete</div>
+    </div>
+    <div class="roadmap-item">
+      <div class="milestone">M5</div>
+      <div class="roadmap-title">Secret Broker + Egress Proxy</div>
+      <div class="status-badge status-done">complete</div>
+    </div>
+    <div class="roadmap-item">
+      <div class="milestone">M6</div>
+      <div class="roadmap-title">Multi-runner pool + Prometheus + Helm</div>
+      <div class="status-badge status-wip">in progress</div>
+    </div>
+    <div class="roadmap-item">
+      <div class="milestone">M7</div>
+      <div class="roadmap-title">Diff snapshots (Firecracker GA)</div>
+      <div class="status-badge status-plan">planned</div>
+    </div>
+    <div class="roadmap-item">
+      <div class="milestone">M8</div>
+      <div class="roadmap-title">ARM64 runner class</div>
+      <div class="status-badge status-plan">planned</div>
+    </div>
+    <div class="roadmap-item">
+      <div class="milestone">M9</div>
+      <div class="roadmap-title">GPU passthrough runner</div>
+      <div class="status-badge status-plan">planned</div>
+    </div>
+  </div>
+</section>
+
+<!-- ── get started ── -->
+<div class="get-started" id="start">
+  <div class="section-label fade-in">// get started</div>
+  <h2 class="fade-in">Up in <em>five minutes</em>.</h2>
+
+  <div class="install-steps fade-in">
+    <div class="install-step">
+      <div class="install-step-num">STEP 01</div>
+      <h4>clone & configure</h4>
+      <code>git clone github.com/Billy1900/Arbor<br>cd Arbor<br>cp deploy/.env.example deploy/.env</code>
+    </div>
+    <div class="install-step">
+      <div class="install-step-num">STEP 02</div>
+      <h4>start the stack</h4>
+      <code>make docker-up<br><br># API: localhost:8080<br># MinIO: localhost:9001</code>
+    </div>
+    <div class="install-step">
+      <div class="install-step-num">STEP 03</div>
+      <h4>register a runner</h4>
+      <code>make register-dev-runner<br><br># Registers this machine<br># as fc-x86_64-v1 class</code>
+    </div>
+    <div class="install-step">
+      <div class="install-step-num">STEP 04</div>
+      <h4>run the fork demo</h4>
+      <code>make demo-fork<br><br># Creates workspace,<br># snapshots, forks 3 branches</code>
+    </div>
+  </div>
+
+  <div style="margin-top: 2.5rem; display: flex; gap: 1rem; flex-wrap: wrap;">
+    <a class="btn-primary" href="https://github.com/Billy1900/Arbor">GitHub →</a>
+    <a class="btn-ghost" href="https://github.com/Billy1900/Arbor/blob/main/INTRO.md">Read the intro</a>
+  </div>
+</div>
+
+<!-- ── footer ── -->
+<footer>
+  <div class="nav-logo">arbor<span>/</span></div>
+  <div class="footer-links">
+    <a href="https://github.com/Billy1900/Arbor">github</a>
+    <a href="#">docs</a>
+    <a href="#">mit license</a>
+  </div>
+  <div style="color: var(--muted); font-size: 11px;">built in rust · firecracker · self-hostable</div>
+</footer>
+
+<script>
+  const obs = new IntersectionObserver((entries) => {
+    entries.forEach(e => {
+      if (e.isIntersecting) {
+        e.target.classList.add('visible');
+        obs.unobserve(e.target);
+      }
+    });
+  }, { threshold: 0.1 });
+
+  document.querySelectorAll('.fade-in').forEach(el => obs.observe(el));
+
+  // trigger hero code block immediately
+  document.querySelector('.hero-code').classList.add('visible');
+</script>
+
+</body>
+</html>
