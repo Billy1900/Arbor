@@ -421,20 +421,24 @@
     margin-top: 3rem;
     background: var(--bg2);
     border: 1px solid var(--border);
-    padding: 2rem;
-    font-family: var(--mono);
-    font-size: 12.5px;
-    line-height: 1.9;
-    color: var(--text);
     overflow-x: auto;
+  }
+
+  .fork-flow pre {
+    padding: 1.75rem 2rem;
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 2;
+    color: var(--text);
+    white-space: pre;
+    margin: 0;
   }
 
   .fork-comment { color: var(--muted); }
   .fork-green { color: var(--green); }
   .fork-amber { color: var(--amber); }
   .fork-blue { color: var(--blue); }
-  .fork-indent { padding-left: 2.5rem; }
-  .fork-indent2 { padding-left: 5rem; }
+  .fork-dim { color: var(--muted); }
 
   /* ── reseal steps ── */
   .reseal-steps {
@@ -835,21 +839,25 @@ workspace.<span class="fn-name">run</span>(<span class="str">"git clone git@gith
   <div class="section-label fade-in">// how fork safety works</div>
 
   <div class="fork-flow fade-in">
-<span class="fork-comment">// Every fork goes through quarantine + reseal before READY.</span>
+    <div class="code-header">
+      <div class="code-dots"><span></span><span></span><span></span></div>
+      <span>reseal_protocol.rs</span>
+    </div>
+    <pre><span class="fork-comment">// Every fork goes through quarantine + reseal before READY.</span>
 <span class="fork-comment">// Enforced at infrastructure level. Zero app coordination needed.</span>
 
 <span class="fork-green">fork</span>(checkpoint_id)
-<span class="fork-indent">└─ new VM boots in <span class="fork-amber">QUARANTINED</span> state</span>
-<span class="fork-indent2">├─ all egress blocked</span>
-<span class="fork-indent2">├─ all attach tokens invalidated</span>
-<span class="fork-indent2">└─ reseal hook chain runs:</span>
-<span class="fork-indent2">    1. bump identity_epoch  → new VM identity</span>
-<span class="fork-indent2">    2. rotate session tokens</span>
-<span class="fork-indent2">    3. re-sign preview URLs</span>
-<span class="fork-indent2">    4. revoke + re-issue secret grants</span>
-<span class="fork-indent2">    5. re-seed guest entropy via vsock</span>
-<span class="fork-indent2">    ──────────────────────────────</span>
-<span class="fork-indent2">    state → <span class="fork-green">READY</span></span>
+  └─ new VM boots in <span class="fork-amber">QUARANTINED</span> state
+      ├─ all egress blocked
+      ├─ all attach tokens invalidated
+      └─ reseal hook chain runs:
+              1. bump identity_epoch   <span class="fork-dim">→</span>  new VM identity
+              2. rotate session tokens
+              3. re-sign preview URLs
+              4. revoke + re-issue secret grants
+              5. re-seed guest entropy via vsock
+              <span class="fork-dim">─────────────────────────────────</span>
+              state <span class="fork-dim">→</span> <span class="fork-green">READY</span></pre>
   </div>
 
   <div class="reseal-steps fade-in">
