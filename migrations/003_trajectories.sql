@@ -49,6 +49,6 @@ CREATE TABLE trace_events (
     payload       JSONB       NOT NULL
 );
 
-CREATE INDEX trace_events_traj_seq  ON trace_events (trajectory_id, step_seq);
+CREATE UNIQUE INDEX trace_events_traj_seq  ON trace_events (trajectory_id, step_seq);
 CREATE INDEX trace_events_workspace ON trace_events (workspace_id);
 CREATE INDEX trace_events_kind      ON trace_events (kind);
