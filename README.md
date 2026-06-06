@@ -141,34 +141,35 @@ Each workspace lives in its own Linux network namespace. The TAP device for Fire
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    arbor-api / arbor-agent               │
-│          Branch lifecycle · Snapshot/restore · Fork      │
-└────────────────────────┬────────────────────────────────┘
-                         │ workspace operations
-         ┌───────────────┼───────────────┐
-         ▼               ▼               ▼
-   ┌──────────┐    ┌──────────┐    ┌──────────┐
-   │ Branch A │    │ Branch B │    │ Branch C │
-   │ FC + Jailer    FC + Jailer    FC + Jailer│
-   │ vsock mux│    │ vsock mux│    │ vsock mux│
-   └──────────┘    └──────────┘    └──────────┘
-         │               │               │
-         └───────────────┼───────────────┘
-                         │ host isolation
-┌────────────────────────┴────────────────────────────────┐
-│  arbor-egress-proxy  │  arbor-snapshot  │  arbor-secret  │
-│  Allowlist · Inject  │  DAG · S3/MinIO  │  broker/Vault  │
-└─────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│                        arbor-api                             │
+│   Workspace lifecycle · Scheduler · Checkpoint DAG · Auth    │
+│                    GET /metrics (Prometheus)                  │
+└──────────────────┬───────────────────────────────────────────┘
+                   │ runner pool (HTTP)
+      ┌────────────┼─────────────┐
+      ▼            ▼             ▼
+┌──────────┐ ┌──────────┐ ┌──────────┐
+│ runner-1 │ │ runner-2 │ │ runner-N │  ← bare-metal KVM hosts
+│ FC+Jailer│ │ FC+Jailer│ │ FC+Jailer│  ← heartbeat every 15s
+│ /metrics │ │ /metrics │ │ /metrics │  ← drain via PUT /drain
+└────┬─────┘ └────┬─────┘ └────┬─────┘
+     │             │             │
+  VMs/workspaces per runner (capacity_slots)
+     │
+┌────┴──────────────────────────────────┐
+│  arbor-egress-proxy  │ arbor-snapshot  │
+│  Allowlist · Inject  │ DAG · S3/MinIO  │
+└───────────────────────────────────────┘
 ```
 
 ### Crates
 
 | Crate | Role |
 |---|---|
-| `arbor-api` | REST API, WebSocket PTY attach (axum) |
-| `arbor-controller` | Workspace state machine, fork/restore orchestration (sqlx/postgres) |
-| `arbor-runner-agent` | Firecracker + Jailer lifecycle, netns, vsock multiplexer |
+| `arbor-api` | REST API, WebSocket PTY attach, runner pool management (axum) |
+| `arbor-controller` | Workspace state machine, scheduler, fork/restore orchestration (sqlx/postgres) |
+| `arbor-runner-agent` | Firecracker + Jailer lifecycle, netns, vsock multiplexer, Prometheus metrics |
 | `arbor-guest-agent` | Static musl binary inside VM: PTY exec, port scan, quiesce |
 | `arbor-snapshot` | Checkpoint manifest, S3/MinIO upload, sha256 integrity |
 | `arbor-egress-proxy` | CONNECT proxy, allowlist enforcement, credential injection (hyper) |
@@ -205,8 +206,28 @@ make demo-fork
 
 Services:
 - API: `http://localhost:8080`
-- Metrics: `http://localhost:8080/metrics`
+- Metrics (API): `http://localhost:8080/metrics`
+- Metrics (runner): `http://localhost:9090/metrics`
 - MinIO console: `http://localhost:9001`
+
+### Kubernetes / Helm (production)
+
+```bash
+# Install the control plane (arbor-api + arbor-egress-proxy)
+helm install arbor deploy/helm/arbor \
+  --namespace arbor --create-namespace \
+  --set api.config.databaseUrl="postgresql://arbor:pass@pg:5432/arbor" \
+  --set api.config.attachTokenSecret="$(openssl rand -hex 32)" \
+  --set api.config.apiBaseUrl="https://arbor.example.com"
+
+# Runner agents run as systemd services on bare-metal KVM hosts (not in k8s).
+# On each runner host, set ARBOR_RUNNER__CONTROLLER_URL and start the agent:
+ARBOR_RUNNER__CONTROLLER_URL=http://arbor-api:8080 \
+ARBOR_RUNNER__ADVERTISE_ADDRESS=http://$(hostname -I | awk '{print $1}'):9090 \
+ARBOR_RUNNER__CAPACITY_SLOTS=10 \
+  ./arbor-runner-agent
+# The agent self-registers and sends heartbeats automatically.
+```
 
 ### Single-node (manual)
 
@@ -220,12 +241,15 @@ make guest-agent
 # Build the Ubuntu 24.04 guest rootfs (requires root + debootstrap)
 sudo make image
 
-# Start services
+# Start the API
 ARBOR__DATABASE_URL=$DATABASE_URL \
 ARBOR__ATTACH_TOKEN_SECRET=$(openssl rand -hex 32) \
   ./target/release/arbor-api &
 
-./target/release/arbor-runner-agent &
+# Start the runner agent (self-registers with the API)
+ARBOR_RUNNER__CONTROLLER_URL=http://localhost:8080 \
+ARBOR_RUNNER__ADVERTISE_ADDRESS=http://localhost:9090 \
+  ./target/release/arbor-runner-agent &
 ```
 
 ---
@@ -306,6 +330,33 @@ curl -X PUT $BASE/v1/workspaces/{ws_id}/secrets/grants/{grant_id} \
 curl -X DELETE $BASE/v1/workspaces/{ws_id}/secrets/grants/{grant_id}
 ```
 
+### Runner pool management
+
+```bash
+# List all registered runners and their health
+curl $BASE/v1/runners
+
+# Manually register a runner (or let the agent self-register on startup)
+curl -X POST $BASE/internal/runners/register \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "runner_class":        "fc-x86_64-v1",
+    "address":             "http://10.0.0.5:9090",
+    "arch":                "x86_64",
+    "firecracker_version": "1.9.0",
+    "cpu_template":        "T2",
+    "capacity_slots":      10
+  }'
+
+# Drain a runner before maintenance (stops new placements immediately)
+curl -X PUT $BASE/internal/runners/{runner_id}/drain
+
+# Deregister a runner after it has fully drained and shut down
+curl -X DELETE $BASE/internal/runners/{runner_id}
+```
+
+Runner agents send a heartbeat to `POST /internal/runners/heartbeat` every 15 seconds reporting their current `used_slots`. The control plane marks any runner that misses heartbeats for more than 60 seconds as unhealthy and stops scheduling new workspaces onto it.
+
 ### Workspace state machine
 
 ```
@@ -328,6 +379,12 @@ creating → ready ⟷ running → checkpointing → ready
 
 **Workspace identity per-header (MVP):** The egress proxy currently identifies the source workspace via an `X-Arbor-Workspace-Id` header. Production deployments should replace this with a cryptographic binding between TAP interface MAC and workspace ID in the runner registry.
 
+**Runner placement:** The scheduler picks the healthy runner with the lowest `used_slots` that still has available capacity (`used_slots < capacity_slots`). For checkpoint restores it additionally filters by `firecracker_version` and `cpu_template` — Firecracker requires an exact match between the host that created the snapshot and the host that restores it. Mismatches return `RUNNER_CLASS_INCOMPATIBLE` before any restore is attempted.
+
+**Drain protocol:** Draining is a two-phase handshake. The control plane marks the runner unhealthy via `PUT /internal/runners/{id}/drain` (stops new placements). The runner agent, on receiving `SIGTERM` or a local `PUT /drain` call, sets its internal drain flag (rejects new `POST /vms` with 503), then waits up to 60 seconds for in-flight VMs to finish before exiting. The control plane's 60-second heartbeat timeout acts as the backstop if the runner exits uncleanly.
+
+**Prometheus metrics:** Both `arbor-api` and `arbor-runner-agent` expose `GET /metrics` in Prometheus text format. Key runner-agent metrics: `arbor.runner.active_vms` (gauge), `arbor.runner.vm_boots_total`, `arbor.runner.vm_boot_duration_seconds`, `arbor.runner.checkpoints_total`, `arbor.runner.restores_total`. The pod annotation `prometheus.io/scrape: "true"` is set by default in the Helm chart.
+
 ---
 
 ## Roadmap
@@ -339,7 +396,7 @@ creating → ready ⟷ running → checkpointing → ready
 | M3 | Full VM checkpoint + S3 upload | ✅ Complete |
 | M4 | Branch-safe fork: quarantine + reseal | ✅ Complete |
 | M5 | Secret Broker + Egress Proxy | ✅ Complete |
-| M6 | Multi-runner pool + Prometheus + Helm | 🔄 In progress |
+| M6 | Multi-runner pool + Prometheus + Helm | ✅ Complete |
 | M7 | Diff snapshots (Firecracker GA) | 📋 Planned |
 | M8 | ARM64 runner class | 📋 Planned |
 | M9 | GPU passthrough runner | 📋 Planned |
@@ -367,11 +424,11 @@ cargo fmt --all
 
 High-value contribution areas:
 
-- **Integration tests** for the full fork + reseal flow
 - **Python and TypeScript SDKs** (currently raw HTTP only)
-- **Multi-runner heartbeat + drain protocol** (M6)
-- **Prometheus metrics** in `arbor-runner-agent`
 - **Vault / AWS Secrets Manager** backend for `arbor-secret-broker` (currently env-var based)
+- **Diff snapshots** once Firecracker GA lands (M7)
+- **ARM64 runner class** (`fc-arm64-v1`, T2A CPU template) (M8)
+- **Integration tests** for the full fork + reseal flow against a live runner
 
 ---
 

@@ -1,0 +1,94 @@
+# Arbor Helm values — override in production with -f values.prod.yaml
+
+# ── Image ─────────────────────────────────────────────────────────────────────
+image:
+  registry: ghcr.io
+  repository: billy1900/arbor
+  tag: ""          # defaults to .Chart.AppVersion
+  pullPolicy: IfNotPresent
+
+# ── arbor-api (control plane REST API) ───────────────────────────────────────
+api:
+  replicaCount: 2
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "256Mi"
+    limits:
+      cpu: "1000m"
+      memory: "512Mi"
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+  service:
+    type: ClusterIP
+    port: 8080
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    hosts:
+      - host: arbor.example.com
+        paths:
+          - path: /
+            pathType: Prefix
+    tls: []
+  config:
+    # Required — set via --set or a sealed secret
+    databaseUrl: ""
+    attachTokenSecret: "change-me-in-production"
+    apiBaseUrl: "http://localhost:8080"
+    defaultRunnerClass: "fc-x86_64-v1"
+    kernelPath: "/var/lib/arbor/firecracker/vmlinux"
+    objectStoreUrl: "local:///var/lib/arbor/snapshots/store"
+    objectStorePrefix: "checkpoints"
+    baseImagesDir: "/var/lib/arbor/images"
+    proxyBind: "0.0.0.0:3128"
+  podAnnotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8080"
+    prometheus.io/path: "/metrics"
+
+# ── arbor-egress-proxy ────────────────────────────────────────────────────────
+egressProxy:
+  enabled: true
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "64Mi"
+    limits:
+      cpu: "500m"
+      memory: "128Mi"
+  service:
+    type: ClusterIP
+    port: 3128
+  config:
+    bind: "0.0.0.0:3128"
+
+# ── PostgreSQL (external — set databaseUrl above) ─────────────────────────────
+# Arbor does not manage a PostgreSQL instance.
+# Point api.config.databaseUrl at your own RDS / CloudSQL / managed Postgres.
+
+# ── Object storage ────────────────────────────────────────────────────────────
+# For production: set api.config.objectStoreUrl to an S3 URL and provide
+# AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY via a secret.
+objectStore:
+  existingSecret: ""   # secret must have keys: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
+
+# ── Service account ───────────────────────────────────────────────────────────
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# ── Pod security ──────────────────────────────────────────────────────────────
+podSecurityContext: {}
+securityContext: {}
+
+# ── Node scheduling ───────────────────────────────────────────────────────────
+nodeSelector: {}
+tolerations: []
+affinity: {}

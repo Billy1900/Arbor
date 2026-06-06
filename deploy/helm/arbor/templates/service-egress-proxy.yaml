@@ -1,0 +1,19 @@
+{{- if .Values.egressProxy.enabled -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "arbor.fullname" . }}-egress-proxy
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "arbor.labels" . | nindent 4 }}
+    {{- include "arbor.proxy.selectorLabels" . | nindent 4 }}
+spec:
+  type: {{ .Values.egressProxy.service.type }}
+  ports:
+    - port: {{ .Values.egressProxy.service.port }}
+      targetPort: proxy
+      protocol: TCP
+      name: proxy
+  selector:
+    {{- include "arbor.proxy.selectorLabels" . | nindent 4 }}
+{{- end }}

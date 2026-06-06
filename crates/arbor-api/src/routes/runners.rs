@@ -7,9 +7,11 @@ use crate::{internal_err, AppState};
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/internal/runners/heartbeat", post(heartbeat))
-        .route("/internal/runners/register",  post(register))
-        .route("/v1/runners",                 axum::routing::get(list_runners))
+        .route("/internal/runners/heartbeat",      post(heartbeat))
+        .route("/internal/runners/register",       post(register))
+        .route("/internal/runners/:id/drain",      axum::routing::put(drain_runner))
+        .route("/internal/runners/:id",            axum::routing::delete(deregister_runner))
+        .route("/v1/runners",                      axum::routing::get(list_runners))
 }
 
 #[derive(Deserialize)]
@@ -57,6 +59,35 @@ async fn register(State(st): State<AppState>, Json(req): Json<RegisterRequest>) 
 async fn list_runners(State(st): State<AppState>) -> impl IntoResponse {
     match st.controller.db.list_all_runners().await {
         Ok(v)  => Json(v).into_response(),
+        Err(e) => internal_err(e).into_response(),
+    }
+}
+
+/// PUT /internal/runners/:id/drain — mark the runner as unhealthy so the scheduler
+/// stops placing new workspaces on it. The runner-agent then drains in-flight VMs
+/// and shuts down. This is the control-plane side of the drain handshake.
+async fn drain_runner(
+    State(st): State<AppState>,
+    axum::extract::Path(id): axum::extract::Path<uuid::Uuid>,
+) -> impl IntoResponse {
+    match st.controller.db.mark_runner_unhealthy(RunnerId(id)).await {
+        Ok(()) => {
+            tracing::info!(%id, "runner marked unhealthy for drain");
+            metrics::counter!("arbor.runner.drain_initiated").increment(1);
+            StatusCode::OK.into_response()
+        }
+        Err(e) => internal_err(e).into_response(),
+    }
+}
+
+/// DELETE /internal/runners/:id — permanently remove a runner record after it has
+/// drained and shut down. Idempotent if called on a non-existent runner.
+async fn deregister_runner(
+    State(st): State<AppState>,
+    axum::extract::Path(id): axum::extract::Path<uuid::Uuid>,
+) -> impl IntoResponse {
+    match st.controller.db.delete_runner(RunnerId(id)).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => internal_err(e).into_response(),
     }
 }

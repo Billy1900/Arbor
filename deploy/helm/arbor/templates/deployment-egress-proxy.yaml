@@ -1,0 +1,52 @@
+{{- if .Values.egressProxy.enabled -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "arbor.fullname" . }}-egress-proxy
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "arbor.labels" . | nindent 4 }}
+    {{- include "arbor.proxy.selectorLabels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.egressProxy.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "arbor.proxy.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "arbor.labels" . | nindent 8 }}
+        {{- include "arbor.proxy.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "arbor.serviceAccountName" . }}
+      containers:
+        - name: arbor-egress-proxy
+          image: {{ include "arbor.image" . }}-egress-proxy
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: proxy
+              containerPort: 3128
+              protocol: TCP
+          env:
+            - name: ARBOR_PROXY_BIND
+              value: {{ .Values.egressProxy.config.bind | quote }}
+            - name: RUST_LOG
+              value: "arbor_egress_proxy=info"
+          livenessProbe:
+            tcpSocket:
+              port: proxy
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          {{- with .Values.egressProxy.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

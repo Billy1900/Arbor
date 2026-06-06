@@ -1,0 +1,16 @@
+apiVersion: v2
+name: arbor
+description: Arbor control plane — microVM sandbox orchestrator for AI agents
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - ai
+  - sandbox
+  - firecracker
+  - agent
+home: https://github.com/Billy1900/Arbor
+sources:
+  - https://github.com/Billy1900/Arbor
+maintainers:
+  - name: Arbor Maintainers

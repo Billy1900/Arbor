@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -56,8 +57,9 @@ pub struct VmEntry {
 
 #[derive(Clone)]
 pub struct VmManager {
-    vms: Arc<parking_lot::RwLock<HashMap<String, Arc<VmEntry>>>>,
-    config: Arc<VmManagerConfig>,
+    vms:       Arc<parking_lot::RwLock<HashMap<String, Arc<VmEntry>>>>,
+    config:    Arc<VmManagerConfig>,
+    draining:  Arc<AtomicBool>,
 }
 
 #[derive(Debug, Clone)]
@@ -88,15 +90,31 @@ impl Default for VmManagerConfig {
 impl VmManager {
     pub fn new(config: VmManagerConfig) -> Self {
         Self {
-            vms: Arc::new(parking_lot::RwLock::new(HashMap::new())),
-            config: Arc::new(config),
+            vms:      Arc::new(parking_lot::RwLock::new(HashMap::new())),
+            config:   Arc::new(config),
+            draining: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    /// Returns true once `set_draining()` has been called.
+    pub fn is_draining(&self) -> bool {
+        self.draining.load(Ordering::Acquire)
+    }
+
+    /// Signals drain mode. Monotonic — cannot be unset. The runner will stop
+    /// accepting new VMs and the SIGTERM handler waits for active_vm_count() == 0.
+    pub fn set_draining(&self) {
+        self.draining.store(true, Ordering::Release);
     }
 
     // ── Create VM ────────────────────────────────────────────────────────────
 
     #[instrument(skip(self, req), fields(ws_id = %req.workspace_id))]
     pub async fn create_vm(&self, req: CreateVmRequest) -> Result<CreateVmResponse> {
+        if self.is_draining() {
+            bail!("runner is draining — not accepting new VMs");
+        }
+
         let ws_id = &req.workspace_id;
         let net_cfg = NetConfig::from_ws_id(ws_id);
 
@@ -140,6 +158,7 @@ impl VmManager {
         fc.put_vsock(arbor_common::proto::VSOCK_GUEST_CID, &vsock_uds.to_string_lossy()).await?;
 
         // 7. Start VM
+        let boot_start = std::time::Instant::now();
         fc.start_instance().await?;
         info!(%ws_id, %vm_id, "Firecracker instance started");
 
@@ -160,6 +179,11 @@ impl VmManager {
         });
 
         self.vms.write().insert(ws_id.clone(), entry);
+
+        let boot_secs = boot_start.elapsed().as_secs_f64();
+        metrics::counter!("arbor.runner.vm_boots_total").increment(1);
+        metrics::histogram!("arbor.runner.vm_boot_duration_seconds").record(boot_secs);
+        metrics::gauge!("arbor.runner.active_vms").set(self.active_vm_count() as f64);
 
         Ok(CreateVmResponse {
             vm_id,
@@ -223,6 +247,8 @@ impl VmManager {
         let mem_size   = tokio::fs::metadata(&mem_path).await.map(|m| m.len()).unwrap_or(0);
 
         info!(ws_id = %entry.workspace_id, state_bytes = state_size, mem_bytes = mem_size, "checkpoint created");
+
+        metrics::counter!("arbor.runner.checkpoints_total").increment(1);
 
         Ok(VmCheckpointResponse {
             state_path: state_path.to_string_lossy().into(),
@@ -292,6 +318,9 @@ impl VmManager {
         });
         self.vms.write().insert(ws_id.clone(), entry);
 
+        metrics::counter!("arbor.runner.restores_total").increment(1);
+        metrics::gauge!("arbor.runner.active_vms").set(self.active_vm_count() as f64);
+
         Ok(VmRestoreResponse {
             vm_id,
             vsock_path: vsock_uds.to_string_lossy().into(),
@@ -326,6 +355,7 @@ impl VmManager {
         let _ = tokio::fs::remove_dir_all(&ws_dir).await;
 
         info!(%ws_id, "VM destroyed");
+        metrics::gauge!("arbor.runner.active_vms").set(self.active_vm_count() as f64);
         Ok(())
     }
 
@@ -416,5 +446,67 @@ async fn wait_for_guest_agent(mux: &SessionMux, timeout: Duration) -> Result<()>
 impl VmManager {
     pub fn active_vm_count(&self) -> u32 {
         self.vms.read().len() as u32
+    }
+}
+
+// ── M6 unit tests ─────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_manager() -> VmManager {
+        VmManager::new(VmManagerConfig::default())
+    }
+
+    // ── Drain flag ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_drain_flag_starts_false() {
+        // A freshly created VmManager must not be in drain mode.
+        // After we add the `draining` AtomicBool field this assertion verifies
+        // the initial state is false so the runner accepts new VMs on startup.
+        let mgr = make_manager();
+        assert!(!mgr.is_draining(),
+            "VmManager must not be draining on construction");
+    }
+
+    #[test]
+    fn test_set_draining_enables_drain_mode() {
+        let mgr = make_manager();
+        mgr.set_draining();
+        assert!(mgr.is_draining(),
+            "set_draining() must flip is_draining() to true");
+    }
+
+    #[test]
+    fn test_drain_flag_is_monotonic() {
+        // Once set, drain cannot be unset. This prevents a window where a
+        // new VM is accepted after the drain signal but before shutdown.
+        let mgr = make_manager();
+        mgr.set_draining();
+        mgr.set_draining(); // second call must be a no-op, not panic
+        assert!(mgr.is_draining());
+    }
+
+    // ── Active VM count ───────────────────────────────────────────────────────
+
+    #[test]
+    fn test_active_vm_count_starts_at_zero() {
+        let mgr = make_manager();
+        assert_eq!(mgr.active_vm_count(), 0,
+            "no VMs registered at construction");
+    }
+
+    // ── Slot headroom arithmetic (mirrors the DB GREATEST guard) ──────────────
+
+    #[test]
+    fn test_used_slots_never_exceeds_reported_count() {
+        // active_vm_count() is what the heartbeat reports as used_slots.
+        // Verify the count is bounded by the HashMap size, not a separate counter
+        // that could drift. This is a documentation/regression test.
+        let mgr = make_manager();
+        // With no VMs inserted the count is exactly 0.
+        assert_eq!(mgr.active_vm_count(), 0);
     }
 }

@@ -10,3 +10,5 @@
 mod db_tests;
 mod reseal_tests;
 mod api_smoke;
+mod runner_pool_tests;
+mod m6_smoke;

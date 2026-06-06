@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "arbor.fullname" . }}-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "arbor.labels" . | nindent 4 }}
+data:
+  ARBOR__BIND: "0.0.0.0:8080"
+  ARBOR__API_BASE_URL: {{ .Values.api.config.apiBaseUrl | quote }}
+  ARBOR__DEFAULT_RUNNER_CLASS: {{ .Values.api.config.defaultRunnerClass | quote }}
+  ARBOR__KERNEL_PATH: {{ .Values.api.config.kernelPath | quote }}
+  ARBOR__OBJECT_STORE_URL: {{ .Values.api.config.objectStoreUrl | quote }}
+  ARBOR__OBJECT_STORE_PREFIX: {{ .Values.api.config.objectStorePrefix | quote }}
+  ARBOR__BASE_IMAGES_DIR: {{ .Values.api.config.baseImagesDir | quote }}
+  ARBOR__PROXY_BIND: {{ .Values.api.config.proxyBind | quote }}
+  RUST_LOG: "arbor_api=info,tower_http=info"

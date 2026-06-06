@@ -1,0 +1,33 @@
+Arbor control plane deployed successfully.
+
+API endpoint:
+{{- if .Values.api.ingress.enabled }}
+{{- range .Values.api.ingress.hosts }}
+  http{{ if $.Values.api.ingress.tls }}s{{ end }}://{{ .host }}
+{{- end }}
+{{- else if eq .Values.api.service.type "LoadBalancer" }}
+  Run: kubectl get svc {{ include "arbor.fullname" . }}-api -n {{ .Release.Namespace }} -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+{{- else }}
+  kubectl port-forward svc/{{ include "arbor.fullname" . }}-api {{ .Values.api.service.port }}:{{ .Values.api.service.port }} -n {{ .Release.Namespace }}
+  Then: http://localhost:{{ .Values.api.service.port }}
+{{- end }}
+
+Metrics (Prometheus):
+  GET /metrics on port {{ .Values.api.service.port }}
+
+Register a runner node (run on the bare-metal KVM host):
+  curl -X POST http://<api-address>/internal/runners/register \
+    -H 'Content-Type: application/json' \
+    -d '{
+      "runner_class": "fc-x86_64-v1",
+      "address": "http://<runner-host>:9090",
+      "arch": "x86_64",
+      "firecracker_version": "1.9.0",
+      "cpu_template": "T2",
+      "capacity_slots": 10
+    }'
+
+Drain a runner before maintenance:
+  curl -X PUT http://<api-address>/internal/runners/<runner-id>/drain
+  # Wait for active VMs to finish, then deregister:
+  curl -X DELETE http://<api-address>/internal/runners/<runner-id>

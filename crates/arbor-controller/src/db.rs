@@ -298,6 +298,12 @@ impl Db {
         Ok(())
     }
 
+    pub async fn delete_runner(&self, id: RunnerId) -> Result<()> {
+        sqlx::query("DELETE FROM runner_nodes WHERE id = $1")
+            .bind(id.0).execute(&self.pool).await?;
+        Ok(())
+    }
+
     pub async fn upsert_runner(&self, node: &RunnerNode) -> Result<()> {
         sqlx::query(
             "INSERT INTO runner_nodes
