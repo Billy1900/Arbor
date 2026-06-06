@@ -94,7 +94,6 @@ pub async fn run(client: &ArborClient, args: BenchmarkArgs) -> Result<()> {
 
     let exec_futs: Vec<_> = ready_results.iter().map(|(ws_id, ready)| {
         let ws_id = *ws_id;
-        let client_ref = client as *const ArborClient;
         let pb = spin_exec.clone();
         let reward = args.reward.clone();
         let timeout = args.timeout;
@@ -106,8 +105,8 @@ pub async fn run(client: &ArborClient, args: BenchmarkArgs) -> Result<()> {
             }
             let t0 = Instant::now();
             let result = async {
-                let sess_id = unsafe { &*client_ref }.exec(ws_id, &reward).await?;
-                let code = unsafe { &*client_ref }.wait_session(ws_id, sess_id, timeout).await?;
+                let sess_id = client.exec(ws_id, &reward).await?;
+                let code = client.wait_session(ws_id, sess_id, timeout).await?;
                 Ok::<i32, anyhow::Error>(code)
             }.await;
             let wall_ms = t0.elapsed().as_millis() as u64;
