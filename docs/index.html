@@ -538,9 +538,10 @@
     white-space: nowrap;
   }
 
-  .status-done { background: var(--green-bg); color: var(--green-d); border: 1px solid var(--green-d); }
-  .status-wip  { background: rgba(245,158,11,0.1); color: var(--amber); border: 1px solid var(--amber); }
-  .status-plan { background: var(--faint); color: var(--muted); border: 1px solid var(--border2); }
+  .status-done    { background: var(--green-bg); color: var(--green-d); border: 1px solid var(--green-d); }
+  .status-wip     { background: rgba(245,158,11,0.1); color: var(--amber); border: 1px solid var(--amber); }
+  .status-plan    { background: var(--faint); color: var(--muted); border: 1px solid var(--border2); }
+  .status-blocked { background: rgba(248,113,113,0.08); color: #f87171; border: 1px solid rgba(248,113,113,0.3); }
 
   /* ── get started ── */
   .get-started {
@@ -749,12 +750,22 @@ workspace.<span class="fn-name">run</span>(<span class="str">"git clone git@gith
     <div class="feature-card">
       <div class="feature-icon">05</div>
       <div class="feature-title">self-hostable</div>
-      <p class="feature-body">The entire control plane, runner pool, and egress proxy run inside your VPC. Code, secrets, and agent activity never leave your network. This is the deployment model — not an enterprise add-on. Docker Compose up in under five minutes.</p>
+      <p class="feature-body">The entire control plane, runner pool, and egress proxy run inside your VPC. Code, secrets, and agent activity never leave your network. Docker Compose for dev, Helm chart for production Kubernetes. Runner agents run on bare-metal KVM hosts and self-register.</p>
     </div>
     <div class="feature-card">
       <div class="feature-icon">06</div>
       <div class="feature-title">sub-150ms boot</div>
       <p class="feature-body">Built on Firecracker, the same microVM technology AWS uses for Lambda. Full VM isolation — not containers — with boot times competitive with container startups. Firecracker's Jailer provides an additional seccomp/cgroup isolation layer.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">07</div>
+      <div class="feature-title">multi-runner pool</div>
+      <p class="feature-body">Scale across any number of bare-metal KVM hosts. Runner agents self-register, send heartbeats every 15 seconds, and drain gracefully on SIGTERM. The scheduler places workspaces on the least-loaded compatible runner. x86_64 and ARM64/Graviton2 pools are supported.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">08</div>
+      <div class="feature-title">arm64 support</div>
+      <p class="feature-body">Native ARM64/Graviton2 runner class (<code>fc-arm64-v1</code>) with T2A CPU template enforcement. The control plane rejects misconfigured runners at registration with <code>RUNNER_ARCH_MISMATCH</code>. x86_64 and aarch64 workspaces are strictly isolated — snapshots can never cross architectures.</p>
     </div>
   </div>
 </section>
@@ -766,14 +777,14 @@ workspace.<span class="fn-name">run</span>(<span class="str">"git clone git@gith
   <div class="section-label fade-in">// architecture</div>
 
   <div class="arch-diagram fade-in">
-    <div style="font-family: var(--mono); font-size: 11px; color: var(--muted); margin-bottom: 1.5rem; letter-spacing: 0.05em;">THREE-LAYER ISOLATION</div>
+    <div style="font-family: var(--mono); font-size: 11px; color: var(--muted); margin-bottom: 1.5rem; letter-spacing: 0.05em;">THREE-LAYER ISOLATION · MULTI-RUNNER POOL</div>
 
     <!-- Layer 1 -->
-    <div style="font-family: var(--mono); font-size: 10px; color: var(--muted); margin-bottom: 4px; letter-spacing: 0.08em;">LAYER 1 — AGENT API</div>
+    <div style="font-family: var(--mono); font-size: 10px; color: var(--muted); margin-bottom: 4px; letter-spacing: 0.08em;">LAYER 1 — CONTROL PLANE (kubernetes / docker compose)</div>
     <div class="arch-row" style="margin-bottom: 1.5rem;">
       <div class="arch-box highlight" style="flex: 2;">
         <div class="arch-box-label">arbor-api</div>
-        <div class="arch-box-sub">REST · WebSocket PTY · axum</div>
+        <div class="arch-box-sub">REST · WebSocket PTY · Scheduler · GET /metrics · axum</div>
       </div>
       <div class="arch-box highlight" style="flex: 2;">
         <div class="arch-box-label">arbor-controller</div>
@@ -781,26 +792,26 @@ workspace.<span class="fn-name">run</span>(<span class="str">"git clone git@gith
       </div>
     </div>
 
-    <div class="arch-arrow">↓ workspace operations ↓</div>
+    <div class="arch-arrow">↓ runner pool (HTTP · heartbeat every 15s) ↓</div>
 
     <!-- Layer 2 -->
-    <div style="font-family: var(--mono); font-size: 10px; color: var(--muted); margin: 1rem 0 4px; letter-spacing: 0.08em;">LAYER 2 — PER-BRANCH EXECUTION</div>
+    <div style="font-family: var(--mono); font-size: 10px; color: var(--muted); margin: 1rem 0 4px; letter-spacing: 0.08em;">LAYER 2 — RUNNER POOL (bare-metal KVM hosts)</div>
     <div class="arch-row" style="margin-bottom: 1.5rem;">
       <div class="arch-box">
-        <div class="arch-box-label">Branch A</div>
-        <div class="arch-box-sub">arbor-runner-agent<br>Firecracker + Jailer<br>vsock mux</div>
+        <div class="arch-box-label">runner-1 · x86_64</div>
+        <div class="arch-box-sub">fc-x86_64-v1 · T2<br>Firecracker + Jailer<br>GET /metrics · PUT /drain</div>
       </div>
       <div class="arch-box">
-        <div class="arch-box-label">Branch B</div>
-        <div class="arch-box-sub">arbor-runner-agent<br>Firecracker + Jailer<br>vsock mux</div>
+        <div class="arch-box-label">runner-2 · x86_64</div>
+        <div class="arch-box-sub">fc-x86_64-v1 · T2<br>Firecracker + Jailer<br>GET /metrics · PUT /drain</div>
       </div>
       <div class="arch-box">
-        <div class="arch-box-label">Branch C</div>
-        <div class="arch-box-sub">arbor-runner-agent<br>Firecracker + Jailer<br>vsock mux</div>
+        <div class="arch-box-label">runner-3 · arm64</div>
+        <div class="arch-box-sub">fc-arm64-v1 · T2A<br>Firecracker + Jailer<br>GET /metrics · PUT /drain</div>
       </div>
     </div>
 
-    <div class="arch-arrow">↓ host isolation ↓</div>
+    <div class="arch-arrow">↓ per-workspace VM isolation ↓</div>
 
     <!-- Layer 3 -->
     <div style="font-family: var(--mono); font-size: 10px; color: var(--muted); margin: 1rem 0 4px; letter-spacing: 0.08em;">LAYER 3 — HOST CONTROLS</div>
@@ -821,14 +832,14 @@ workspace.<span class="fn-name">run</span>(<span class="str">"git clone git@gith
   </div>
 
   <div class="crates-list fade-in">
-    <div class="crate-badge">arbor-api <span class="crate-role">— REST + WebSocket</span></div>
-    <div class="crate-badge">arbor-controller <span class="crate-role">— state machine</span></div>
-    <div class="crate-badge">arbor-runner-agent <span class="crate-role">— VM lifecycle</span></div>
-    <div class="crate-badge">arbor-guest-agent <span class="crate-role">— musl binary in VM</span></div>
+    <div class="crate-badge">arbor-api <span class="crate-role">— REST + WebSocket + runner pool</span></div>
+    <div class="crate-badge">arbor-controller <span class="crate-role">— state machine + scheduler</span></div>
+    <div class="crate-badge">arbor-runner-agent <span class="crate-role">— VM lifecycle + Prometheus + drain</span></div>
+    <div class="crate-badge">arbor-guest-agent <span class="crate-role">— musl binary in VM (x86_64 + arm64)</span></div>
     <div class="crate-badge">arbor-snapshot <span class="crate-role">— checkpoint manifests</span></div>
     <div class="crate-badge">arbor-egress-proxy <span class="crate-role">— CONNECT proxy</span></div>
     <div class="crate-badge">arbor-secret-broker <span class="crate-role">— grant lifecycle</span></div>
-    <div class="crate-badge">arbor-common <span class="crate-role">— shared types</span></div>
+    <div class="crate-badge">arbor-common <span class="crate-role">— shared types + errors</span></div>
   </div>
 </section>
 
@@ -956,6 +967,22 @@ workspace.<span class="fn-name">run</span>(<span class="str">"git clone git@gith
           <td><span class="check">✓</span></td>
         </tr>
         <tr>
+          <td class="feature-name">Multi-runner pool + Helm</td>
+          <td class="arbor-col"><span class="check">✓</span></td>
+          <td><span class="cross">✗</span></td>
+          <td><span class="cross">✗</span></td>
+          <td><span class="partial">~</span> partial</td>
+          <td><span class="partial">~</span> partial</td>
+        </tr>
+        <tr>
+          <td class="feature-name">ARM64 / Graviton2</td>
+          <td class="arbor-col"><span class="check">✓</span> fc-arm64-v1</td>
+          <td><span class="cross">✗</span></td>
+          <td><span class="cross">✗</span></td>
+          <td><span class="check">✓</span></td>
+          <td><span class="cross">✗</span></td>
+        </tr>
+        <tr>
           <td class="feature-name">Sub-150ms boot</td>
           <td class="arbor-col"><span class="check">✓</span></td>
           <td><span class="check">✓</span></td>
@@ -1011,17 +1038,17 @@ workspace.<span class="fn-name">run</span>(<span class="str">"git clone git@gith
     <div class="roadmap-item">
       <div class="milestone">M6</div>
       <div class="roadmap-title">Multi-runner pool + Prometheus + Helm</div>
-      <div class="status-badge status-wip">in progress</div>
+      <div class="status-badge status-done">complete</div>
     </div>
     <div class="roadmap-item">
       <div class="milestone">M7</div>
       <div class="roadmap-title">Diff snapshots (Firecracker GA)</div>
-      <div class="status-badge status-plan">planned</div>
+      <div class="status-badge status-blocked">blocked upstream</div>
     </div>
     <div class="roadmap-item">
       <div class="milestone">M8</div>
-      <div class="roadmap-title">ARM64 runner class</div>
-      <div class="status-badge status-plan">planned</div>
+      <div class="roadmap-title">ARM64 runner class (fc-arm64-v1)</div>
+      <div class="status-badge status-done">complete</div>
     </div>
     <div class="roadmap-item">
       <div class="milestone">M9</div>
@@ -1045,18 +1072,25 @@ workspace.<span class="fn-name">run</span>(<span class="str">"git clone git@gith
     <div class="install-step">
       <div class="install-step-num">STEP 02</div>
       <h4>start the stack</h4>
-      <code>make docker-up<br><br># API: localhost:8080<br># MinIO: localhost:9001</code>
+      <code>make docker-up<br><br># API:    localhost:8080<br># Metrics: localhost:8080/metrics<br># MinIO:  localhost:9001</code>
     </div>
     <div class="install-step">
       <div class="install-step-num">STEP 03</div>
       <h4>register a runner</h4>
-      <code>make register-dev-runner<br><br># Registers this machine<br># as fc-x86_64-v1 class</code>
+      <code>make register-dev-runner<br><br># x86_64 → fc-x86_64-v1 T2<br># ARM64  → register-dev-runner-arm64</code>
     </div>
     <div class="install-step">
       <div class="install-step-num">STEP 04</div>
       <h4>run the fork demo</h4>
       <code>make demo-fork<br><br># Creates workspace,<br># snapshots, forks 3 branches</code>
     </div>
+  </div>
+
+  <div style="margin-top: 2rem; background: var(--bg2); border: 1px solid var(--border); padding: 1.25rem 1.5rem; font-family: var(--mono); font-size: 12px; color: var(--muted); line-height: 1.8;">
+    <span style="color: var(--muted); letter-spacing: 0.08em; font-size: 10px;">PRODUCTION / KUBERNETES</span><br>
+    <span style="color: var(--text);">helm install arbor deploy/helm/arbor</span> --namespace arbor --create-namespace \<br>
+    &nbsp;&nbsp;--set api.config.databaseUrl=<span style="color: var(--amber);">"postgresql://..."</span> \<br>
+    &nbsp;&nbsp;--set api.config.attachTokenSecret=<span style="color: var(--amber);">"$(openssl rand -hex 32)"</span>
   </div>
 
   <div style="margin-top: 2.5rem; display: flex; gap: 1rem; flex-wrap: wrap;">
@@ -1073,7 +1107,7 @@ workspace.<span class="fn-name">run</span>(<span class="str">"git clone git@gith
     <a href="#">docs</a>
     <a href="#">mit license</a>
   </div>
-  <div style="color: var(--muted); font-size: 11px;">built in rust · firecracker · self-hostable</div>
+  <div style="color: var(--muted); font-size: 11px;">built in rust · firecracker · x86_64 + arm64 · self-hostable</div>
 </footer>
 
 <script>

@@ -65,6 +65,8 @@ let results = join_all([
 | Credential brokering | ✅ Host-side proxy | ❌ | ✅ Partial | ❌ | ❌ |
 | Default-deny egress | ✅ | ✅ Partial | ✅ | ❌ | ❌ |
 | Self-host / VPC-first | ✅ **First-class** | ❌ SaaS only | ❌ SaaS only | ❌ SaaS only | ✅ |
+| Multi-runner pool + Helm | ✅ | ❌ | ❌ | ✅ Partial | ✅ Partial |
+| ARM64 / Graviton2 | ✅ `fc-arm64-v1` | ❌ | ❌ | ✅ | ❌ |
 | Sub-150ms boot | ✅ | ✅ | ❌ | ✅ | ❌ |
 | Open source | ✅ MIT / Rust | ❌ SDK only | ❌ | ❌ | ✅ |
 
@@ -337,6 +339,7 @@ curl -X DELETE $BASE/v1/workspaces/{ws_id}/secrets/grants/{grant_id}
 curl $BASE/v1/runners
 
 # Manually register a runner (or let the agent self-register on startup)
+# x86_64 runner:
 curl -X POST $BASE/internal/runners/register \
   -H 'Content-Type: application/json' \
   -d '{
@@ -346,6 +349,18 @@ curl -X POST $BASE/internal/runners/register \
     "firecracker_version": "1.9.0",
     "cpu_template":        "T2",
     "capacity_slots":      10
+  }'
+
+# ARM64 / Graviton2 runner (cpu_template must be T2A):
+curl -X POST $BASE/internal/runners/register \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "runner_class":        "fc-arm64-v1",
+    "address":             "http://10.0.1.5:9090",
+    "arch":                "aarch64",
+    "firecracker_version": "1.9.0",
+    "cpu_template":        "T2A",
+    "capacity_slots":      8
   }'
 
 # Drain a runner before maintenance (stops new placements immediately)
@@ -369,7 +384,7 @@ creating → ready ⟷ running → checkpointing → ready
 
 ## Key design decisions
 
-**CPU template:** Uses `T2` (Intel x86_64), not `T2A` (ARM/Graviton2). Firecracker requires the CPU template to match between snapshot creation and restore. This is enforced via the `compatibility_key` stored in every checkpoint manifest. Mismatches return `RUNNER_CLASS_INCOMPATIBLE` before any restore is attempted.
+**CPU templates by runner class:** Two runner classes are supported. `fc-x86_64-v1` requires `cpu_template=T2` (Intel) and `arch=x86_64`. `fc-arm64-v1` requires `cpu_template=T2A` (Graviton2) and `arch=aarch64`. Firecracker requires the CPU template to match exactly between the host that created a snapshot and the host that restores it. The `compatibility_key` stored in every checkpoint manifest enforces this — restoring across architectures or mismatched templates returns `RUNNER_CLASS_INCOMPATIBLE`. Mixing templates at registration time returns `422 RUNNER_ARCH_MISMATCH`.
 
 **Full VM snapshots only:** Firecracker's diff snapshot support is still developer preview. All checkpoints are full VM snapshots. Incremental support is on the roadmap for M7 once Firecracker GA lands.
 
