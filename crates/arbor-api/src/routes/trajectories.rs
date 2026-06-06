@@ -80,8 +80,9 @@ async fn list_events(
     State(st): State<AppState>,
     Path(tid):  Path<Uuid>,
     Query(q):   Query<EventsQuery>,
-) -> impl IntoResponse {
-    match st.tracer.list_events(TrajectoryId(tid), q.limit.min(200), q.after).await {
+    let limit = q.limit.clamp(1, 200);
+    let after = q.after.max(-1);
+    match st.tracer.list_events(TrajectoryId(tid), limit, after).await {
         Ok(rows) => Json(rows).into_response(),
         Err(e)   => internal_err(anyhow::anyhow!(e)).into_response(),
     }
