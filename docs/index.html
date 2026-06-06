@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Arbor — Branch-Native Agent Sandboxes</title>
+<title>Arbor — Checkpoint-Native Rollout Infrastructure for Agentic RL</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
@@ -688,9 +688,9 @@
 
 <!-- ── hero ── -->
 <div class="hero">
-  <div class="hero-label">agent infrastructure · built in rust</div>
-  <h1>Fork execution state.<br>Restore <em>anywhere</em>.<br>Leak nothing.</h1>
-  <p class="hero-sub">Arbor gives AI agent teams microVM-isolated workspaces they can snapshot mid-task, fork into parallel branches, and restore safely — all inside your own VPC. The only sandbox where branching is a first-class primitive.</p>
+  <div class="hero-label">agentic rl infrastructure · built in rust · vpc-first</div>
+  <h1>Fork rollouts.<br>Replay failures.<br><em>Train from real states.</em></h1>
+  <p class="hero-sub">Arbor is the checkpoint-native execution layer for coding-agent RL: snapshot mid-task, branch N independent attempts, collect per-step trajectories, replay any failure — all inside your own VPC. The execution graph your reward model actually needs.</p>
   <div class="hero-actions">
     <a class="btn-primary" href="#start">Get started →</a>
     <a class="btn-ghost" href="https://github.com/Billy1900/Arbor">View on GitHub</a>
@@ -699,27 +699,24 @@
   <div class="hero-code fade-in">
     <div class="code-header">
       <div class="code-dots"><span></span><span></span><span></span></div>
-      <span>parallel_migration.rs</span>
+      <span>rollout_benchmark.sh</span>
     </div>
-    <pre><span class="cm">// Set up a workspace, snapshot before the risky migration,</span>
-<span class="cm">// then fork three parallel agents to try different approaches.</span>
+    <pre><span class="cm"># Fork 8 isolated rollouts from one bug-repro checkpoint.</span>
+<span class="cm"># Collect trajectories, attribute reward, export winning patch.</span>
 
-<span class="kw">let</span> workspace = <span class="type">Arbor</span>::<span class="fn-name">new</span>().await?;
-workspace.<span class="fn-name">run</span>(<span class="str">"git clone git@github.com:acme/monorepo.git ."</span>).await?;
+arbor run-benchmark swebench-lite \
+  --models claude-opus-4,claude-sonnet-4 \
+  --forks 8 \
+  --checkpoint repo@HEAD \
+  --reward <span class="str">"cargo test --test integration"</span>
 
-<span class="kw">let</span> checkpoint = workspace.<span class="fn-name">snapshot</span>(<span class="str">"before-migration"</span>).await?;
+<span class="cm"># attempt-0  ✅  47 tool calls · $0.23 · 4m12s  ← patch exported</span>
+<span class="cm"># attempt-1  ❌  61 tool calls · $0.31 · 6m08s  ← replay available</span>
+<span class="cm"># attempt-2  ❌  38 tool calls · $0.18 · 3m44s</span>
+<span class="cm"># ...                                             ← trajectories → s3://</span>
 
-<span class="cm">// Three isolated worlds. None can observe or interfere with each other.</span>
-<span class="kw">let</span> postgres = checkpoint.<span class="fn-name">fork</span>(<span class="str">"postgres-migration"</span>).await?;
-<span class="kw">let</span> redis    = checkpoint.<span class="fn-name">fork</span>(<span class="str">"redis-approach"</span>).await?;
-<span class="kw">let</span> skip     = checkpoint.<span class="fn-name">fork</span>(<span class="str">"skip-migration"</span>).await?;
-
-<span class="cm">// Each fork: quarantined → identity resealed → credentials re-issued → READY</span>
-<span class="kw">let</span> results = <span class="fn-name">join_all</span>([
-    postgres.<span class="fn-name">run</span>(<span class="str">"cargo test --test integration"</span>),
-    redis.<span class="fn-name">run</span>(<span class="str">"cargo test --test integration"</span>),
-    skip.<span class="fn-name">run</span>(<span class="str">"cargo test --test integration"</span>),
-]).await;</pre>
+arbor replay attempt-1 --from-step 20   <span class="cm"># rewind to failure point</span>
+arbor diff attempt-0 attempt-3          <span class="cm"># compare strategies cross-fork</span></pre>
   </div>
 </div>
 
@@ -739,8 +736,13 @@ workspace.<span class="fn-name">run</span>(<span class="str">"git clone git@gith
     </div>
     <div class="feature-card">
       <div class="feature-icon">03</div>
-      <div class="feature-title">checkpoint dag</div>
-      <p class="feature-body">Every checkpoint records its parent, forming a DAG of execution history. Fork three agents from the same pre-migration state, let them explore in parallel, and merge the winner — without any of them observing each other.</p>
+      <div class="feature-title">rollout dag</div>
+      <p class="feature-body">Every checkpoint records its parent, forming a DAG of execution history across all rollout attempts. Fork N agents from the same start state, let them explore independently, diff strategies cross-fork, and merge the winner — the execution graph your reward model actually needs.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">10</div>
+      <div class="feature-title">trajectory tracer <span style="color:var(--amber);font-size:10px;font-weight:400;">M10</span></div>
+      <p class="feature-body">Per-fork traces: prompt, tool calls, shell commands, file diffs, test results, network access, token cost, wall time. Reward attribution traces which steps contributed to the final outcome. Cross-fork diff shows where strategies diverged. Export winning trajectories as JSONL for fine-tuning. Replay any failure from any step.</p>
     </div>
     <div class="feature-card">
       <div class="feature-icon">04</div>
@@ -1068,6 +1070,16 @@ workspace.<span class="fn-name">run</span>(<span class="str">"git clone git@gith
       <div class="roadmap-title">GPU-capable workspaces via host-mediated inference</div>
       <div class="status-badge status-done">complete</div>
     </div>
+    <div class="roadmap-item">
+      <div class="milestone">M10</div>
+      <div class="roadmap-title">Trajectory tracer + rollout debugger — per-step traces, cross-fork diff, reward attribution, replay</div>
+      <div class="status-badge status-plan">planned</div>
+    </div>
+    <div class="roadmap-item">
+      <div class="milestone">M11</div>
+      <div class="roadmap-title"><code>arbor run-benchmark</code> CLI — SWE-bench / custom benchmarks, multi-model comparison, trajectory export</div>
+      <div class="status-badge status-plan">planned</div>
+    </div>
   </div>
 </section>
 
@@ -1120,7 +1132,7 @@ workspace.<span class="fn-name">run</span>(<span class="str">"git clone git@gith
     <a href="#">docs</a>
     <a href="#">mit license</a>
   </div>
-  <div style="color: var(--muted); font-size: 11px;">built in rust · firecracker · x86_64 + arm64 · self-hostable</div>
+  <div style="color: var(--muted); font-size: 11px;">built in rust · firecracker · checkpoint-native · vpc-first · agentic rl</div>
 </footer>
 
 <script>

@@ -19,6 +19,7 @@ sha2        = { workspace = true }
 hex         = { workspace = true }
 async-trait = { workspace = true }
 parking_lot = { workspace = true }
+dashmap     = { workspace = true }
 futures     = { workspace = true }
 rand        = { workspace = true }
 hyper       = { workspace = true }

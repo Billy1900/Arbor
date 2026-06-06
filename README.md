@@ -5,23 +5,25 @@
 [![Stars](https://img.shields.io/github/stars/Billy1900/Arbor)](https://github.com/Billy1900/Arbor)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen)](https://github.com/Billy1900/Arbor/pulls)
 
-**The only agent sandbox where forking execution state is a first-class primitive.**
+**Checkpoint-native rollout infrastructure for agentic RL.**
 
-Arbor gives AI agent teams microVM-isolated workspaces they can snapshot mid-task, fork into parallel branches, and restore safely — all inside your own VPC. No SaaS. No credential leaks. No shared entropy between forks.
+Arbor is the execution layer for branching coding-agent rollouts: snapshot mid-task, fork into parallel attempts, replay any failure, collect trajectories for training — all inside your own VPC. No SaaS. No credential leaks. No shared entropy between forks.
 
 Built in Rust on top of [Firecracker](https://github.com/firecracker-microvm/firecracker).
+
+> *Time-travel infrastructure for coding agents. Fork, replay, and train from real execution states.*
 
 ---
 
 ## Why Arbor?
 
-Multi-agent workflows hit three problems that no existing sandbox solves together:
+Agentic RL over coding tasks — SWE-bench, internal bug benchmarks, multi-step refactors — hits three problems no existing sandbox solves together:
 
-**1. You can't safely fork execution state.** Firecracker's own documentation warns that restoring the same snapshot twice gives both VMs identical PRNG seeds, token caches, and SSH agent state. For multi-agent branching, that's a correctness bug, not an acceptable limitation.
+**1. You can't safely branch rollouts.** Running the same checkpoint twice gives both VMs identical PRNG seeds, session tokens, and SSH state (Firecracker's own docs warn about this). For RL rollouts where you need N independent attempts from the same start state, that's a correctness bug that silently poisons your reward signal.
 
-**2. Credentials end up inside the VM.** The standard pattern — inject `OPENAI_API_KEY` as an environment variable — means any agent that logs its environment, runs a compromised dependency, or is manipulated by prompt injection can exfiltrate your keys.
+**2. You have no trajectory visibility.** You can see whether a test passed, but not which tool call introduced the regression, which step wasted tokens on a wrong hypothesis, or which fork's approach was actually better. Without per-step traces tied to execution state, attribution and replay are impossible.
 
-**3. You can't run this on your own infrastructure.** Every existing coding sandbox is SaaS-only. If your codebase is proprietary, your compliance team won't allow agent traffic to touch a third-party cloud.
+**3. Your training data can't leave your VPC.** Every existing coding sandbox is SaaS-only. Proprietary codebases, internal APIs, and the trajectories you're collecting for fine-tuning can't touch a third-party cloud.
 
 Arbor solves all three.
 
@@ -29,28 +31,43 @@ Arbor solves all three.
 
 ## Quick look
 
+```bash
+# Run a SWE-bench-style rollout: fork 8 independent attempts from one checkpoint
+arbor run-benchmark swebench-lite \
+  --models claude-opus-4,claude-sonnet-4 \
+  --forks 8 \
+  --checkpoint repo@HEAD \
+  --reward "cargo test --test integration"
+
+# → spins up 8 isolated microVMs from the same snapshot
+# → each attempt gets fresh identity, entropy, credentials
+# → traces collected: prompt · tool calls · shell cmds · file diffs · cost · wall time
+# → success/failure attributed per step
+# → winning patch exported; failing attempts available for replay
+```
+
+Or drive it directly from the API:
+
 ```rust
-// Spin up an isolated workspace
-let workspace = Arbor::new().await?;
+// Snapshot the repo at a known-broken state
+let workspace = Arbor::new().repo("git@github.com:acme/monorepo.git").await?;
+let checkpoint = workspace.snapshot("bug-repro").await?;
 
-// Run real builds inside a Firecracker microVM
-workspace.run("git clone git@github.com:acme/monorepo.git .").await?;
-workspace.run("cargo build --release").await?;
+// Fork 8 isolated rollouts — each gets a fresh identity, entropy, and secret grants
+let attempts: Vec<_> = (0..8)
+    .map(|i| checkpoint.fork(format!("attempt-{i}")))
+    .collect::<FuturesOrdered<_>>()
+    .collect()
+    .await;
 
-// Snapshot before the risky part
-let checkpoint = workspace.snapshot("before-migration").await?;
+// Run agents in parallel — none can observe or interfere with each other
+let results = join_all(
+    attempts.iter().map(|ws| ws.run("cargo test --test integration"))
+).await;
 
-// Fork three agents — each gets a fresh, independent identity
-let pg    = checkpoint.fork("postgres-migration").await?;
-let redis = checkpoint.fork("redis-approach").await?;
-let skip  = checkpoint.fork("skip-migration").await?;
-
-// Run in parallel — none can observe or interfere with the others
-let results = join_all([
-    pg.run("cargo test --test integration"),
-    redis.run("cargo test --test integration"),
-    skip.run("cargo test --test integration"),
-]).await;
+// Export the winning trajectory for fine-tuning; replay the failures
+let winner = results.iter().find(|r| r.exit_code == 0);
+winner.map(|r| r.export_trajectory("s3://my-bucket/trajectories/"));
 ```
 
 ---
@@ -134,7 +151,26 @@ ws-main ──ckpt-A "before-migration"
 
 Each fork has its own isolated identity, its own Docker daemon, its own egress policy, and its own secret grants. The parent workspace keeps running. None of the attempts can observe each other.
 
-### 4. Structural security, not policy security
+### 4. Trajectory tracer (M10 — planned)
+
+The checkpoint DAG is the execution graph. M10 adds a trace layer that attaches to every fork:
+
+```
+fork(checkpoint_id)
+ └─ attempt-0: ✅ tests pass  · 47 tool calls · $0.23 · 4m12s
+     ├─ step 14: patch src/auth.rs  ← reward-contributing diff
+     └─ trajectory exported → s3://bucket/trajectories/attempt-0.jsonl
+
+ └─ attempt-1: ❌ tests fail  · 61 tool calls · $0.31 · 6m08s
+     ├─ step 22: introduced regression in src/db.rs  ← failure attribution
+     └─ replay available: arbor replay attempt-1 --from-step 20
+```
+
+Per-fork trace contents: prompt, tool calls, shell commands, file diffs, test results, network accesses, token cost, wall time. Cross-fork diff shows exactly where strategies diverged. Reward attribution traces which steps contributed to the final test result. Successful trajectories export as JSONL for fine-tuning.
+
+This turns Arbor from an infra repo into an **agentic RL experimentation platform**: rollouts, reward, trajectory, fork, replay — all in one place.
+
+### 5. Structural security, not policy security
 
 Each workspace lives in its own Linux network namespace. The TAP device for Firecracker lives inside that netns. Traffic flows through a veth pair to the host, where nftables enforces the allowlist and the egress proxy handles credential injection. A VM **cannot** bypass the egress policy — there is no route out except through the proxy. This is structural, not configurable.
 
@@ -419,6 +455,8 @@ creating → ready ⟷ running → checkpointing → ready
 | M7 | Diff snapshots (Firecracker GA) | ⏸ Blocked — diff snapshots remain upstream developer preview |
 | M8 | ARM64 runner class | ✅ Complete |
 | M9 | GPU-capable workspaces via host-mediated inference | ✅ Complete |
+| M10 | Trajectory tracer + rollout debugger | 🔜 Planned |
+| M11 | `arbor run-benchmark` CLI + SWE-bench integration | 🔜 Planned |
 
 ---
 

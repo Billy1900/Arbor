@@ -419,6 +419,9 @@ pub struct RestoreRequest {
     pub target: String,
     pub workspace_name: Option<String>,
     pub post_restore: PostRestoreConfig,
+    /// If set, this fork is part of the given rollout.
+    #[serde(default)]
+    pub rollout_id: Option<crate::trace::RolloutId>,
 }
 
 fn default_target() -> String { "new_workspace".into() }

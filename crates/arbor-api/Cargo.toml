@@ -37,3 +37,4 @@ arbor-egress-proxy  = { path = "../arbor-egress-proxy" }
 
 metrics                     = { workspace = true }
 metrics-exporter-prometheus = { workspace = true }
+tokio-stream                = { version = "0.1", features = ["sync"] }

@@ -15,3 +15,4 @@ hex        = { workspace = true }
 bytes      = { workspace = true }
 sqlx      = { workspace = true }
 rand      = { workspace = true }
+tokio     = { workspace = true }
