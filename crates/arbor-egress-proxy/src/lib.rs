@@ -308,16 +308,16 @@ async fn handle_http(
     let uri = req.uri().to_string();
     debug!(%ws_id, %uri, "plain HTTP proxy request");
 
-    // M10: emit NetworkAccess for plain HTTP
     if let Some(emitter) = state.emitters.get(&ws_id.to_string()) {
         emitter.emit(TraceEvent::NetworkAccess {
             host: host.clone(),
             method: req.method().to_string(),
-            status_code: 200,
+            status_code: StatusCode::NOT_IMPLEMENTED.as_u16(),
             bytes_sent: 0,
             bytes_received: 0,
             brokered: grant.is_some(),
         });
+    }
     }
 
     // MVP: plain HTTP forwarding not implemented — most API traffic uses HTTPS CONNECT.
