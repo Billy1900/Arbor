@@ -2,7 +2,7 @@
 ///
 /// The store owns a background writer task that batch-inserts trace events
 /// every 50 ms or when 100 events accumulate. Writers never block callers —
-/// TraceEmitter::emit drops the record if the channel is full.
+/// TraceEmitter::emit is fire-and-forget and drops the record only if the receiver is closed.
 #[allow(dead_code)]
 use anyhow::Result;
 use chrono::Utc;
