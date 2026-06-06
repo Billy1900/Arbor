@@ -89,6 +89,44 @@ podSecurityContext: {}
 securityContext: {}
 
 # ── Node scheduling ───────────────────────────────────────────────────────────
+# The control plane (arbor-api + egress-proxy) is architecture-agnostic and can
+# run on any node. Runner agents run on bare-metal KVM hosts, not in Kubernetes.
+
 nodeSelector: {}
 tolerations: []
 affinity: {}
+
+# Example: pin the control plane to x86_64 nodes in a mixed cluster.
+# nodeSelector:
+#   kubernetes.io/arch: amd64
+
+# Example: pin to ARM64 (Graviton3) nodes.
+# nodeSelector:
+#   kubernetes.io/arch: arm64
+# tolerations:
+#   - key: "arch"
+#     operator: "Equal"
+#     value: "arm64"
+#     effect: "NoSchedule"
+
+# ── ARM64 runner notes ────────────────────────────────────────────────────────
+# Runner agents (arbor-runner-agent) run directly on bare-metal KVM hosts and
+# are NOT managed by this Helm chart. To add an ARM64 runner:
+#
+#   On the aarch64 host:
+#     make firecracker-bins-arm64   # installs FC + jailer for aarch64
+#     make guest-agent-arm64        # builds static aarch64 guest-agent binary
+#     make image-arm64              # builds Ubuntu 24.04 aarch64 guest rootfs
+#
+#   Start the runner agent:
+#     ARBOR_RUNNER__CONTROLLER_URL=http://<api>:8080 \
+#     ARBOR_RUNNER__RUNNER_CLASS=fc-arm64-v1 \
+#     ARBOR_RUNNER__CPU_TEMPLATE=T2A \
+#     ARBOR_RUNNER__ARCH=aarch64 \
+#     ARBOR_RUNNER__ADVERTISE_ADDRESS=http://<host-ip>:9090 \
+#     ARBOR_RUNNER__CAPACITY_SLOTS=10 \
+#       ./arbor-runner-agent
+#
+#   The agent self-registers. The API validates that fc-arm64-v1 runners
+#   always report arch=aarch64 and cpu_template=T2A — mismatches are rejected
+#   with HTTP 422 RUNNER_ARCH_MISMATCH.

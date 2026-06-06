@@ -16,7 +16,14 @@ make test-integration  # DB integration tests (needs PostgreSQL running)
 
 # Run M6 unit tests only (no DB)
 SQLX_OFFLINE=true cargo test -p arbor-tests --test m6_smoke
-SQLX_OFFLINE=true cargo test -p arbor-runner-agent  # drain flag tests
+SQLX_OFFLINE=true cargo test -p arbor-runner-agent  # drain flag + ARM64 config tests
+
+# Run M8 ARM64 tests (no DB)
+SQLX_OFFLINE=true cargo test -p arbor-tests --test m8_arm64_tests
+
+# Or use the Makefile shortcuts
+make test-m6
+make test-m8
 
 # Code quality
 make fmt            # cargo fmt --all
@@ -28,8 +35,10 @@ make db-reset       # drop + recreate DB
 
 # Infrastructure
 make docker-up      # start postgres + minio + services via compose
-make guest-agent    # build static musl arbor-guest-agent binary
-make firecracker-bins  # download Firecracker v1.9.0 + jailer to /var/lib/arbor/firecracker/bin
+make guest-agent             # build static musl arbor-guest-agent (x86_64)
+make guest-agent-arm64       # build static musl arbor-guest-agent (aarch64, needs gcc-aarch64-linux-gnu)
+make firecracker-bins        # download Firecracker v1.9.0 + jailer (x86_64)
+make firecracker-bins-arm64  # download Firecracker v1.9.0 + jailer (aarch64)
 
 # Helm (production deploy — control plane only)
 helm install arbor deploy/helm/arbor --namespace arbor --create-namespace \
@@ -65,6 +74,8 @@ Arbor is a Rust workspace that provides Firecracker-microVM-backed agent sandbox
 
 **State machine**: Workspace states live in `arbor-controller/src/state_machine.rs`. Transitions are driven by the API and runner-agent heartbeats.
 
+**ARM64 runner class (M8)**: `fc-arm64-v1` runners require `arch=aarch64` and `cpu_template=T2A` (Graviton2). The registration handler in `arbor-api/src/routes/runners.rs::validate_runner_class` enforces this — mismatches return `422 RUNNER_ARCH_MISMATCH`. `FcClient::put_machine_config` now takes `cpu_template` as a parameter (was hardcoded `"T2"`); `VmManagerConfig` carries `arch` and `cpu_template` fields set from `AgentConfig`. ARM64 and x86_64 workspaces are kept separate by `runner_class` — the scheduler never mixes them, and `CompatibilityKey` catches any cross-arch restore attempt.
+
 **Runner pool (M6)**: Runners self-register via `POST /internal/runners/register` on startup. The scheduler (`arbor-controller/src/scheduler.rs`) picks the healthy runner with the lowest `used_slots`. For restores it also filters by `firecracker_version` + `cpu_template` — mismatches return `RUNNER_CLASS_INCOMPATIBLE`. The API marks any runner that misses heartbeats for >60s as unhealthy via a background sweep in `arbor-api/src/main.rs`.
 
 **Drain (M6)**: `PUT /internal/runners/{id}/drain` on the API marks the runner unhealthy (stops placements). `PUT /drain` on the runner-agent sets an `AtomicBool` drain flag that rejects new `POST /vms` with 503. On `SIGTERM` the agent sets the flag and waits up to 60s for `active_vm_count() == 0` before exiting.
@@ -81,7 +92,8 @@ Arbor is a Rust workspace that provides Firecracker-microVM-backed agent sandbox
 | `ARBOR_RUNNER__RUNNER_CLASS` | `fc-x86_64-v1` | Runner class label |
 | `ARBOR_RUNNER__CAPACITY_SLOTS` | `10` | Max concurrent VMs |
 | `ARBOR_RUNNER__FIRECRACKER_VERSION` | `1.9.0` | Reported FC version (must match binary) |
-| `ARBOR_RUNNER__CPU_TEMPLATE` | `T2` | CPU template (T2 for x86_64) |
+| `ARBOR_RUNNER__CPU_TEMPLATE` | `T2` | CPU template: `T2` for x86_64, `T2A` for aarch64/Graviton2 |
+| `ARBOR_RUNNER__ARCH` | `x86_64` | Host architecture: `x86_64` or `aarch64` |
 
 ### Database
 

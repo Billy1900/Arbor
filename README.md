@@ -381,6 +381,8 @@ creating → ready ⟷ running → checkpointing → ready
 
 **Runner placement:** The scheduler picks the healthy runner with the lowest `used_slots` that still has available capacity (`used_slots < capacity_slots`). For checkpoint restores it additionally filters by `firecracker_version` and `cpu_template` — Firecracker requires an exact match between the host that created the snapshot and the host that restores it. Mismatches return `RUNNER_CLASS_INCOMPATIBLE` before any restore is attempted.
 
+**ARM64 runner class (`fc-arm64-v1`):** ARM64 Graviton2 hosts use the `T2A` CPU template, not `T2`. The control plane enforces this at registration time — a runner posting `runner_class=fc-arm64-v1` with `cpu_template=T2` is rejected with `422 RUNNER_ARCH_MISMATCH`. The scheduler keeps x86_64 and aarch64 workspaces entirely separate via the `runner_class` field; a checkpoint created on an ARM64 runner can only be restored on another ARM64 runner with the same Firecracker version. Build the ARM64 guest agent and Firecracker binaries with `make guest-agent-arm64` and `make firecracker-bins-arm64`.
+
 **Drain protocol:** Draining is a two-phase handshake. The control plane marks the runner unhealthy via `PUT /internal/runners/{id}/drain` (stops new placements). The runner agent, on receiving `SIGTERM` or a local `PUT /drain` call, sets its internal drain flag (rejects new `POST /vms` with 503), then waits up to 60 seconds for in-flight VMs to finish before exiting. The control plane's 60-second heartbeat timeout acts as the backstop if the runner exits uncleanly.
 
 **Prometheus metrics:** Both `arbor-api` and `arbor-runner-agent` expose `GET /metrics` in Prometheus text format. Key runner-agent metrics: `arbor.runner.active_vms` (gauge), `arbor.runner.vm_boots_total`, `arbor.runner.vm_boot_duration_seconds`, `arbor.runner.checkpoints_total`, `arbor.runner.restores_total`. The pod annotation `prometheus.io/scrape: "true"` is set by default in the Helm chart.
@@ -397,8 +399,8 @@ creating → ready ⟷ running → checkpointing → ready
 | M4 | Branch-safe fork: quarantine + reseal | ✅ Complete |
 | M5 | Secret Broker + Egress Proxy | ✅ Complete |
 | M6 | Multi-runner pool + Prometheus + Helm | ✅ Complete |
-| M7 | Diff snapshots (Firecracker GA) | 📋 Planned |
-| M8 | ARM64 runner class | 📋 Planned |
+| M7 | Diff snapshots (Firecracker GA) | ⏸ Blocked — diff snapshots remain upstream developer preview |
+| M8 | ARM64 runner class | ✅ Complete |
 | M9 | GPU passthrough runner | 📋 Planned |
 
 ---
@@ -426,8 +428,7 @@ High-value contribution areas:
 
 - **Python and TypeScript SDKs** (currently raw HTTP only)
 - **Vault / AWS Secrets Manager** backend for `arbor-secret-broker` (currently env-var based)
-- **Diff snapshots** once Firecracker GA lands (M7)
-- **ARM64 runner class** (`fc-arm64-v1`, T2A CPU template) (M8)
+- **Diff snapshots** (M7) — blocked on Firecracker diff snapshot feature graduating from developer preview
 - **Integration tests** for the full fork + reseal flow against a live runner
 
 ---

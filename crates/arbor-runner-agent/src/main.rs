@@ -48,8 +48,12 @@ struct AgentConfig {
     capacity_slots: u32,
     #[serde(default = "default_fc_version")]
     firecracker_version: String,
+    /// CPU template: "T2" for x86_64, "T2A" for aarch64/Graviton2
     #[serde(default = "default_cpu_template")]
     cpu_template: String,
+    /// Host architecture reported to the controller: "x86_64" or "aarch64"
+    #[serde(default = "default_arch")]
+    arch: String,
     /// The address the controller uses to reach this agent (e.g. http://10.0.0.5:9090)
     #[serde(default)]
     advertise_address: Option<String>,
@@ -60,6 +64,7 @@ fn default_runner_class() -> String { "fc-x86_64-v1".into() }
 fn default_capacity()     -> u32    { 10 }
 fn default_fc_version()   -> String { "1.9.0".into() }
 fn default_cpu_template() -> String { "T2".into() }
+fn default_arch()         -> String { "x86_64".into() }
 
 // ── AppState ─────────────────────────────────────────────────────────────────
 
@@ -98,6 +103,8 @@ async fn main() -> Result<()> {
     if let Some(v) = cfg.kernel_path     { vm_cfg.kernel_path     = v; }
     if let Some(v) = cfg.workspaces_dir  { vm_cfg.workspaces_dir  = v; }
     if let Some(v) = cfg.base_images_dir { vm_cfg.base_images_dir = v; }
+    vm_cfg.cpu_template = cfg.cpu_template.clone();
+    vm_cfg.arch         = cfg.arch.clone();
 
     let mgr = Arc::new(VmManager::new(vm_cfg));
 
@@ -113,6 +120,7 @@ async fn main() -> Result<()> {
             cfg.capacity_slots,
             &cfg.firecracker_version,
             &cfg.cpu_template,
+            &cfg.arch,
         ).await.context("failed to register with controller")?;
 
         info!(%runner_id, "registered with controller");
@@ -182,6 +190,7 @@ async fn self_register(
     capacity_slots: u32,
     firecracker_version: &str,
     cpu_template: &str,
+    arch: &str,
 ) -> Result<uuid::Uuid> {
     let client = reqwest::Client::new();
     let url    = format!("{}/internal/runners/register", controller_url.trim_end_matches('/'));
@@ -190,7 +199,7 @@ async fn self_register(
         .json(&serde_json::json!({
             "runner_class":        runner_class,
             "address":             advertise_address,
-            "arch":                "x86_64",
+            "arch":                arch,
             "firecracker_version": firecracker_version,
             "cpu_template":        cpu_template,
             "capacity_slots":      capacity_slots,

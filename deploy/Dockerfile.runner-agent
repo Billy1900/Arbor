@@ -1,15 +1,53 @@
-FROM rust:1.78-slim AS builder
+# arbor-runner-agent — multi-arch image (linux/amd64 and linux/arm64)
+#
+# Build for x86_64 (default):
+#   docker build -f deploy/Dockerfile.runner-agent -t arbor-runner-agent:latest .
+#
+# Build for ARM64 (Graviton2 / Apple Silicon host with --platform):
+#   docker buildx build --platform linux/arm64 \
+#     -f deploy/Dockerfile.runner-agent -t arbor-runner-agent:latest-arm64 .
+#
+# The runner-agent binary itself is compiled natively inside the builder stage,
+# so the TARGETARCH build argument selects the correct Rust target automatically.
+
+FROM --platform=$BUILDPLATFORM rust:1.78-slim AS builder
+ARG TARGETARCH
 WORKDIR /build
-RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
+
+RUN apt-get update && apt-get install -y \
+  pkg-config libssl-dev \
+  gcc-aarch64-linux-gnu \
+  && rm -rf /var/lib/apt/lists/*
+
 COPY Cargo.toml Cargo.lock ./
 COPY crates/ crates/
 COPY migrations/ migrations/
-RUN cargo build --release -p arbor-runner-agent
 
-FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y \
-  ca-certificates libssl3 \
-  iproute2 iptables nftables \
-  && rm -rf /var/lib/apt/lists/*
-COPY --from=builder /build/target/release/arbor-runner-agent /usr/local/bin/arbor-runner-agent
-ENTRYPOINT ["/usr/local/bin/arbor-runner-agent"]
+# Select the correct musl target based on the build platform argument.
+# We compile a fully static binary so the runtime image needs no libc.
+RUN case "$TARGETARCH" in \
+      amd64)  RUST_TARGET=x86_64-unknown-linux-musl ;; \
+      arm64)  RUST_TARGET=aarch64-unknown-linux-musl \
+              CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-linux-gnu-gcc ;; \
+      *)      echo "Unsupported TARGETARCH: $TARGETARCH" && exit 1 ;; \
+    esac && \
+    rustup target add $RUST_TARGET && \
+    CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=${CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER:-} \
+    SQLX_OFFLINE=true \
+    cargo build --release \
+      --target $RUST_TARGET \
+      -p arbor-runner-agent && \
+    cp target/$RUST_TARGET/release/arbor-runner-agent /arbor-runner-agent
+
+# ── Runtime ───────────────────────────────────────────────────────────────────
+# Distroless static — no shell, no libc needed (musl binary is fully static)
+FROM scratch
+COPY --from=builder /arbor-runner-agent /arbor-runner-agent
+
+# Runtime dependencies installed on the KVM host (not in this container):
+#   iproute2, nftables — for netns + TAP setup
+#   /dev/kvm           — KVM device passthrough
+#
+# In production the runner-agent runs directly on the KVM host as a systemd
+# service. This container is provided for CI / local dev only.
+ENTRYPOINT ["/arbor-runner-agent"]

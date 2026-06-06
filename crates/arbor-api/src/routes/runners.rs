@@ -1,9 +1,10 @@
-//! Runner node management routes (M6).
+//! Runner node management routes (M6 + M8).
 //! Runner agents call POST /internal/runners/heartbeat every 15s.
+//! M8 adds registration validation: runner_class ↔ arch ↔ cpu_template must be consistent.
 use axum::{extract::State, http::StatusCode, response::{IntoResponse, Json}, routing::post, Router};
 use serde::Deserialize;
 use arbor_common::*;
-use crate::{internal_err, AppState};
+use crate::{arbor_err, internal_err, AppState};
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -13,6 +14,63 @@ pub fn router() -> Router<AppState> {
         .route("/internal/runners/:id",            axum::routing::delete(deregister_runner))
         .route("/v1/runners",                      axum::routing::get(list_runners))
 }
+
+// ── Validation ────────────────────────────────────────────────────────────────
+
+/// Enforces that runner_class, arch, and cpu_template are mutually consistent.
+///
+/// Firecracker CPU templates are architecture-specific:
+///   - `T2`  → Intel x86_64  (fc-x86_64-v1)
+///   - `T2A` → ARM Graviton2 (fc-arm64-v1)
+///
+/// Mixing these silently produces VMs that either crash at boot or cannot be
+/// safely restored — the snapshot compatibility_key catches the mismatch at
+/// restore time, but we catch it earlier here to give a clear error message.
+fn validate_runner_class(
+    runner_class: &str,
+    arch: &str,
+    cpu_template: &str,
+) -> Result<(), ArborError> {
+    match runner_class {
+        "fc-x86_64-v1" => {
+            if arch != "x86_64" {
+                return Err(ArborError::RunnerArchMismatch {
+                    expected: "x86_64".into(),
+                    got: arch.into(),
+                });
+            }
+            if cpu_template != "T2" {
+                return Err(ArborError::RunnerArchMismatch {
+                    expected: "T2 (required for fc-x86_64-v1)".into(),
+                    got: cpu_template.into(),
+                });
+            }
+        }
+        "fc-arm64-v1" => {
+            if arch != "aarch64" {
+                return Err(ArborError::RunnerArchMismatch {
+                    expected: "aarch64".into(),
+                    got: arch.into(),
+                });
+            }
+            if cpu_template != "T2A" {
+                return Err(ArborError::RunnerArchMismatch {
+                    expected: "T2A (required for fc-arm64-v1)".into(),
+                    got: cpu_template.into(),
+                });
+            }
+        }
+        unknown => {
+            return Err(ArborError::RunnerArchMismatch {
+                expected: "fc-x86_64-v1 or fc-arm64-v1".into(),
+                got: unknown.into(),
+            });
+        }
+    }
+    Ok(())
+}
+
+// ── Handlers ─────────────────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
 struct HeartbeatRequest {
@@ -38,6 +96,10 @@ struct RegisterRequest {
 }
 
 async fn register(State(st): State<AppState>, Json(req): Json<RegisterRequest>) -> impl IntoResponse {
+    if let Err(e) = validate_runner_class(&req.runner_class, &req.arch, &req.cpu_template) {
+        return arbor_err(e).into_response();
+    }
+
     let node = RunnerNode {
         id:                  RunnerId::new(),
         runner_class:        req.runner_class,

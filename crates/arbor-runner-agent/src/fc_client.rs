@@ -67,7 +67,7 @@ pub struct LoggerConfig {
 
 #[derive(Debug, Serialize)]
 pub struct SnapshotCreateParams {
-    pub snapshot_type: String,  // "Full" or "Diff" (Diff is still developer preview)
+    pub snapshot_type: String,  // "Full" or "Diff" (Diff is upstream developer preview — M7)
     pub snapshot_path: String,
     pub mem_file_path: String,
 }
@@ -124,12 +124,12 @@ impl FcClient {
     }
 
     #[instrument(skip(self))]
-    pub async fn put_machine_config(&self, vcpu: u32, mem_mib: u32) -> Result<()> {
+    pub async fn put_machine_config(&self, vcpu: u32, mem_mib: u32, cpu_template: &str) -> Result<()> {
         self.put("/machine-config", &MachineConfig {
-            vcpu_count: vcpu,
+            vcpu_count:   vcpu,
             mem_size_mib: mem_mib,
-            cpu_template: Some("T2".into()),  // x86_64 template
-            smt: Some(false),
+            cpu_template: Some(cpu_template.to_string()),
+            smt:          Some(false),
         }).await
     }
 

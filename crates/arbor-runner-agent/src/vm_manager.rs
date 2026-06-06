@@ -71,6 +71,10 @@ pub struct VmManagerConfig {
     pub base_images_dir: String,
     pub jailer_uid: u32,
     pub jailer_gid: u32,
+    /// Host CPU architecture: "x86_64" or "aarch64"
+    pub arch: String,
+    /// Firecracker CPU template: "T2" (x86_64) or "T2A" (aarch64/Graviton2)
+    pub cpu_template: String,
 }
 
 impl Default for VmManagerConfig {
@@ -83,6 +87,8 @@ impl Default for VmManagerConfig {
             base_images_dir: BASE_IMAGES_DIR.into(),
             jailer_uid:      JAILER_UID,
             jailer_gid:      JAILER_GID,
+            arch:            "x86_64".into(),
+            cpu_template:    "T2".into(),
         }
     }
 }
@@ -151,7 +157,7 @@ impl VmManager {
         let fc = FcClient::new(fc_socket.to_string_lossy().as_ref());
 
         fc.put_logger(&log_file.to_string_lossy()).await?;
-        fc.put_machine_config(req.vcpu_count, req.memory_mib).await?;
+        fc.put_machine_config(req.vcpu_count, req.memory_mib, &self.config.cpu_template).await?;
         fc.put_boot_source(&self.config.kernel_path).await?;
         fc.put_drive("rootfs", &rootfs.to_string_lossy(), true).await?;
         fc.put_network_interface("eth0", &net_cfg.tap_name, &net_cfg.guest_mac).await?;
@@ -502,11 +508,40 @@ mod tests {
 
     #[test]
     fn test_used_slots_never_exceeds_reported_count() {
-        // active_vm_count() is what the heartbeat reports as used_slots.
-        // Verify the count is bounded by the HashMap size, not a separate counter
-        // that could drift. This is a documentation/regression test.
         let mgr = make_manager();
-        // With no VMs inserted the count is exactly 0.
         assert_eq!(mgr.active_vm_count(), 0);
+    }
+
+    // ── M8: VmManagerConfig arch + cpu_template ───────────────────────────────
+
+    #[test]
+    fn test_vm_manager_config_defaults_to_x86() {
+        let cfg = VmManagerConfig::default();
+        assert_eq!(cfg.arch, "x86_64",
+            "default arch must be x86_64");
+        assert_eq!(cfg.cpu_template, "T2",
+            "default cpu_template must be T2 (Intel x86_64)");
+    }
+
+    #[test]
+    fn test_vm_manager_config_arm64() {
+        let cfg = VmManagerConfig {
+            arch:         "aarch64".into(),
+            cpu_template: "T2A".into(),
+            ..Default::default()
+        };
+        assert_eq!(cfg.arch,         "aarch64");
+        assert_eq!(cfg.cpu_template, "T2A");
+    }
+
+    #[test]
+    fn test_arm64_template_is_not_t2() {
+        let cfg = VmManagerConfig {
+            arch:         "aarch64".into(),
+            cpu_template: "T2A".into(),
+            ..Default::default()
+        };
+        assert_ne!(cfg.cpu_template, "T2",
+            "ARM64 must use T2A, not T2 — using T2 on aarch64 causes FC boot failure");
     }
 }
