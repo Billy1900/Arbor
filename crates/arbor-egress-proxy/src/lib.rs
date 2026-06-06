@@ -318,7 +318,6 @@ async fn handle_http(
             brokered: grant.is_some(),
         });
     }
-    }
 
     // MVP: plain HTTP forwarding not implemented — most API traffic uses HTTPS CONNECT.
     error_response(StatusCode::NOT_IMPLEMENTED, "plain HTTP forwarding not yet implemented; use HTTPS")

@@ -151,7 +151,7 @@ ws-main ──ckpt-A "before-migration"
 
 Each fork has its own isolated identity, its own Docker daemon, its own egress policy, and its own secret grants. The parent workspace keeps running. None of the attempts can observe each other.
 
-### 4. Trajectory tracer (M10 — planned)
+### 4. Trajectory tracer (M10)
 
 The checkpoint DAG is the execution graph. M10 adds a trace layer that attaches to every fork:
 
@@ -455,8 +455,8 @@ creating → ready ⟷ running → checkpointing → ready
 | M7 | Diff snapshots (Firecracker GA) | ⏸ Blocked — diff snapshots remain upstream developer preview |
 | M8 | ARM64 runner class | ✅ Complete |
 | M9 | GPU-capable workspaces via host-mediated inference | ✅ Complete |
-| M10 | Trajectory tracer + rollout debugger | 🔜 Planned |
-| M11 | `arbor run-benchmark` CLI + SWE-bench integration | 🔜 Planned |
+| M10 | Trajectory tracer + rollout debugger | ✅ Done |
+| M11 | `arbor run-benchmark` CLI + SWE-bench integration | ✅ Done |
 
 ---
 

@@ -273,6 +273,7 @@ impl TrajectoryStore {
 
     /// Simple cross-fork diff over the first 1000 events: find the first step_seq
     /// where the two trajectories' event `kind` differs (payload is not compared).
+    pub async fn diff_trajectories(
         &self,
         traj_a: TrajectoryId,
         traj_b: TrajectoryId,
