@@ -37,6 +37,7 @@ struct SessionState {
     output_tail: Vec<u8>,     // last 4 KiB of combined output for trace
     started_at:  std::time::Instant,
     command:     Vec<String>, // stored at Exec dispatch time for ExecStarted
+    cwd:         String,      // stored at Exec dispatch time for ExecStarted
 }
 
 // ── SessionMux ───────────────────────────────────────────────────────────────
@@ -88,7 +89,7 @@ impl SessionMux {
 
     /// Store the command for a session so ExecStarted can include it.
     /// Call this right before sending HostMessage::Exec.
-    pub fn register_exec(&self, session_id: SessionId, command: Vec<String>) {
+    pub fn register_exec(&self, session_id: SessionId, command: Vec<String>, cwd: String) {
         let mut s = self.sessions.write();
         let state = s.entry(session_id).or_insert_with(|| SessionState {
             output_tx:   broadcast::channel(OUTPUT_BROADCAST_CAP).0,
@@ -96,8 +97,10 @@ impl SessionMux {
             output_tail: Vec::new(),
             started_at:  std::time::Instant::now(),
             command:     Vec::new(),
+            cwd:         String::new(),
         });
         state.command    = command;
+        state.cwd        = cwd;
         state.started_at = std::time::Instant::now();
         state.output_tail.clear();
     }
@@ -117,6 +120,7 @@ impl SessionMux {
             output_tail: Vec::new(),
             started_at:  std::time::Instant::now(),
             command:     Vec::new(),
+            cwd:         String::new(),
         });
         rx
     }
@@ -226,6 +230,7 @@ impl SessionMux {
                     output_tail: Vec::new(),
                     started_at:  std::time::Instant::now(),
                     command:     Vec::new(),
+                    cwd:         String::new(),
                 });
                 // reset timer on each start confirmation
                 state.started_at = std::time::Instant::now();
@@ -234,7 +239,7 @@ impl SessionMux {
                     e.emit(TraceEvent::ExecStarted {
                         session_id,
                         command: state.command.clone(),
-                        cwd:     String::new(),
+                        cwd:     state.cwd.clone(),
                     });
                 }
             }
