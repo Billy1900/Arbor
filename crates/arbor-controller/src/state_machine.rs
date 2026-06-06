@@ -6,6 +6,7 @@ use std::sync::Arc;
 use tracing::{error, info, instrument, warn};
 
 use arbor_common::*;
+use arbor_common::trace::TraceEvent;
 use arbor_common::proto::{
     CreateVmRequest, VmCheckpointRequest, VmExecRequest, VmRestoreRequest,
 };
@@ -16,13 +17,15 @@ use crate::reseal::{run_reseal_hooks, EnvSecretResolver, ResealContext};
 use crate::runner_client::RunnerClient;
 use crate::scheduler::Scheduler;
 use crate::snapshot::SnapshotService;
+use crate::tracer::TrajectoryStore;
 
 pub struct Controller {
-    pub db:       Arc<Db>,
+    pub db:        Arc<Db>,
     pub scheduler: Arc<Scheduler>,
-    pub config:   Arc<ControllerConfig>,
-    pub snapshot: Arc<SnapshotService>,
-    pub grants:   Arc<GrantRegistry>,
+    pub config:    Arc<ControllerConfig>,
+    pub snapshot:  Arc<SnapshotService>,
+    pub grants:    Arc<GrantRegistry>,
+    pub tracer:    Arc<TrajectoryStore>,
 }
 
 #[derive(Debug, Clone)]
@@ -37,13 +40,14 @@ pub struct ControllerConfig {
 
 impl Controller {
     pub fn new(
-        db:       Arc<Db>,
+        db:        Arc<Db>,
         scheduler: Arc<Scheduler>,
-        config:   Arc<ControllerConfig>,
-        snapshot: Arc<SnapshotService>,
-        grants:   Arc<GrantRegistry>,
+        config:    Arc<ControllerConfig>,
+        snapshot:  Arc<SnapshotService>,
+        grants:    Arc<GrantRegistry>,
+        tracer:    Arc<TrajectoryStore>,
     ) -> Self {
-        Self { db, scheduler, config, snapshot, grants }
+        Self { db, scheduler, config, snapshot, grants, tracer }
     }
 
     // ── Create workspace ──────────────────────────────────────────────────────
@@ -258,6 +262,15 @@ impl Controller {
 
         info!(%ws_id, %ckpt_id, "checkpoint sealed and uploaded");
         metrics::counter!("arbor.checkpoint.created").increment(1);
+
+        // M10: emit CheckpointTaken into the active trajectory for this workspace
+        if let Some(emitter) = self.tracer.emitter_for(ws_id) {
+            emitter.emit(TraceEvent::CheckpointTaken {
+                checkpoint_id: ckpt_id,
+                name: None,
+            });
+        }
+
         Ok(())
     }
 
@@ -356,6 +369,21 @@ impl Controller {
         });
 
         metrics::counter!("arbor.fork.created").increment(1);
+
+        // M10: open a trajectory for this fork and emit WorkspaceForked
+        let rollout_id = req.rollout_id;
+        let tracer = Arc::clone(&self.tracer);
+        let ckpt_id_for_trace = ckpt_id;
+        tokio::spawn(async move {
+            match tracer.open_trajectory(ws_id, rollout_id, None).await {
+                Ok(emitter) => emitter.emit(TraceEvent::WorkspaceForked {
+                    parent_checkpoint_id: ckpt_id_for_trace,
+                    rollout_id,
+                }),
+                Err(e) => warn!(?e, %ws_id, "failed to open trajectory for fork"),
+            }
+        });
+
         Ok((fork_ws, op))
     }
 

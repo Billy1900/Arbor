@@ -11,7 +11,7 @@ use tower_http::{timeout::TimeoutLayer, trace::TraceLayer};
 use tracing::info;
 
 use arbor_common::ApiError;
-use arbor_controller::{Controller, ControllerConfig, Db, GrantRegistry, Scheduler, SnapshotService};
+use arbor_controller::{Controller, ControllerConfig, Db, GrantRegistry, Scheduler, SnapshotService, TrajectoryStore};
 use arbor_egress_proxy::ProxyState;
 
 // ── Config ────────────────────────────────────────────────────────────────────
@@ -43,8 +43,9 @@ fn default_proxy_bind()   -> String { "0.0.0.0:3128".into() }
 
 #[derive(Clone)]
 pub struct AppState {
-    pub controller: Arc<Controller>,
+    pub controller:  Arc<Controller>,
     pub proxy_state: ProxyState,
+    pub tracer:      Arc<TrajectoryStore>,
 }
 
 // ── main ──────────────────────────────────────────────────────────────────────
@@ -97,12 +98,13 @@ async fn main() -> Result<()> {
     }
 
     // ── Controller ────────────────────────────────────────────────────────────
+    // ── Trajectory store + background writer (M10) ───────────────────────────
+    let (tracer, tracer_writer) = TrajectoryStore::new(pool.clone());
+    tokio::spawn(tracer_writer);
+
     let db        = Arc::new(Db::new(pool));
     let scheduler = Arc::new(Scheduler::new(Arc::clone(&db)));
 
-    // Snapshot service — try S3 first, fall back to local
-    // MVP: local filesystem snapshot store. Set ARBOR__OBJECT_STORE_URL=local:///path for dev.
-    // For S3: rebuild with --features s3 and set AWS_* env vars.
     let snap_base = if cfg.object_store_url.starts_with("local://") {
         cfg.object_store_url.trim_start_matches("local://").to_string()
     } else {
@@ -118,9 +120,9 @@ async fn main() -> Result<()> {
         api_base_url:        cfg.api_base_url.clone(),
         object_store_prefix: cfg.object_store_prefix,
     });
-
     let controller = Arc::new(Controller::new(
         Arc::clone(&db), scheduler, ctrl_cfg, snapshot, Arc::clone(&grants),
+        Arc::clone(&tracer),
     ));
 
     // ── Runner health sweep (M6) — mark stale runners unhealthy ───────────────
@@ -135,13 +137,14 @@ async fn main() -> Result<()> {
         });
     }
 
-    let state = AppState { controller, proxy_state };
+    let state = AppState { controller, proxy_state, tracer };
 
     // ── Router ────────────────────────────────────────────────────────────────
     let app = Router::new()
         .merge(routes::workspaces::router())
         .merge(routes::sessions::router())
         .merge(routes::runners::router())
+        .merge(routes::trajectories::router())
         .merge(attach::router())
         .route("/health",  axum::routing::get(health))
         .route("/metrics", axum::routing::get(move || async move {

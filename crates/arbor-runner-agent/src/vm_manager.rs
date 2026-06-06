@@ -205,6 +205,9 @@ impl VmManager {
     #[instrument(skip(self, req))]
     pub async fn exec(&self, vm_id_or_ws: &str, req: VmExecRequest) -> Result<VmExecResponse> {
         let entry = self.get_vm(vm_id_or_ws)?;
+        entry
+            .mux
+            .register_exec(req.session_id, req.command.clone(), req.cwd.clone());
         entry.mux.send(HostMessage::Exec {
             session_id: req.session_id,
             command:    req.command,

@@ -30,6 +30,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tracing::{debug, info, warn};
 
 use arbor_common::{SecretGrant, SecretMode, WorkspaceId};
+use arbor_common::trace::{TraceEmitter, TraceEvent};
 
 // ── Grant registry ────────────────────────────────────────────────────────────
 
@@ -109,6 +110,9 @@ pub struct ProxyState {
     // Allowlist for plain (non-brokered) egress
     // workspace_id → set of allowed host patterns
     pub egress_allowlist: Arc<RwLock<HashMap<String, Vec<String>>>>,
+    /// Per-workspace emitter for M10 trace events.
+    /// Populated by the API layer after fork_checkpoint opens a trajectory.
+    pub emitters: Arc<dashmap::DashMap<String, TraceEmitter>>,
 }
 
 impl ProxyState {
@@ -116,7 +120,16 @@ impl ProxyState {
         Self {
             registry,
             egress_allowlist: Arc::new(RwLock::new(HashMap::new())),
+            emitters: Arc::new(dashmap::DashMap::new()),
         }
+    }
+
+    pub fn register_emitter(&self, workspace_id: WorkspaceId, emitter: TraceEmitter) {
+        self.emitters.insert(workspace_id.to_string(), emitter);
+    }
+
+    pub fn drop_emitter(&self, workspace_id: WorkspaceId) {
+        self.emitters.remove(&workspace_id.to_string());
     }
 
     pub fn allow_egress(&self, workspace_id: WorkspaceId, hosts: Vec<String>) {
@@ -220,6 +233,18 @@ async fn handle_connect(
 
     info!(%ws_id, %host, "CONNECT tunnel allowed");
 
+    // M10: emit NetworkAccess trace event (best-effort)
+    if let Some(emitter) = state.emitters.get(&ws_id.to_string()) {
+        emitter.emit(TraceEvent::NetworkAccess {
+            host: host.to_string(),
+            method: "CONNECT".to_string(),
+            status_code: 200,
+            bytes_sent: 0,
+            bytes_received: 0,
+            brokered: grant.is_some(),
+        });
+    }
+
     let host_owned = host.to_string();
     // Upgrade the connection and splice
     tokio::spawn(async move {
@@ -282,6 +307,18 @@ async fn handle_http(
 
     let uri = req.uri().to_string();
     debug!(%ws_id, %uri, "plain HTTP proxy request");
+
+    if let Some(emitter) = state.emitters.get(&ws_id.to_string()) {
+        emitter.emit(TraceEvent::NetworkAccess {
+            host: host.clone(),
+            method: req.method().to_string(),
+            status_code: StatusCode::NOT_IMPLEMENTED.as_u16(),
+            bytes_sent: 0,
+            bytes_received: 0,
+            brokered: grant.is_some(),
+        });
+    }
+    }
 
     // MVP: plain HTTP forwarding not implemented — most API traffic uses HTTPS CONNECT.
     error_response(StatusCode::NOT_IMPLEMENTED, "plain HTTP forwarding not yet implemented; use HTTPS")

@@ -23,6 +23,7 @@ use tracing::{debug, error, info, warn};
 use arbor_common::proto::{
     decode_frame_length, encode_frame, GuestMessage, HostMessage, VSOCK_AGENT_PORT,
 };
+use arbor_common::trace::{TraceEmitter, TraceEvent};
 use arbor_common::SessionId;
 
 const OUTPUT_BROADCAST_CAP: usize = 512;
@@ -31,30 +32,49 @@ const CMD_CHANNEL_CAP: usize = 256;
 // ── Per-session state ─────────────────────────────────────────────────────────
 
 struct SessionState {
-    output_tx: broadcast::Sender<Vec<u8>>,
-    exited_tx: Option<oneshot::Sender<i32>>,
+    output_tx:   broadcast::Sender<Vec<u8>>,
+    exited_tx:   Option<oneshot::Sender<i32>>,
+    output_tail: Vec<u8>,     // last 4 KiB of combined output for trace
+    started_at:  std::time::Instant,
+    command:     Vec<String>, // stored at Exec dispatch time for ExecStarted
+    cwd:         String,      // stored at Exec dispatch time for ExecStarted
 }
 
 // ── SessionMux ───────────────────────────────────────────────────────────────
 
 pub struct SessionMux {
     vsock_path: String,
-    cmd_tx: mpsc::Sender<Vec<u8>>,
-    sessions: Arc<RwLock<HashMap<SessionId, SessionState>>>,
+    cmd_tx:     mpsc::Sender<Vec<u8>>,
+    sessions:   Arc<RwLock<HashMap<SessionId, SessionState>>>,
     quiesce_tx: Arc<RwLock<Option<oneshot::Sender<()>>>>,
-    pong_tx: Arc<RwLock<Option<oneshot::Sender<()>>>>,
+    pong_tx:    Arc<RwLock<Option<oneshot::Sender<()>>>>,
+    /// Injected by vm_manager after a trajectory is opened for this workspace.
+    emitter:    Arc<RwLock<Option<TraceEmitter>>>,
 }
 
 impl SessionMux {
     pub fn new(vsock_path: String) -> Self {
         let (cmd_tx, cmd_rx) = mpsc::channel(CMD_CHANNEL_CAP);
-        let sessions  = Arc::new(RwLock::new(HashMap::new()));
+        let sessions   = Arc::new(RwLock::new(HashMap::new()));
         let quiesce_tx = Arc::new(RwLock::new(None));
         let pong_tx    = Arc::new(RwLock::new(None));
+        let emitter    = Arc::new(RwLock::new(None));
 
-        let mux = Self { vsock_path: vsock_path.clone(), cmd_tx, sessions, quiesce_tx, pong_tx };
+        let mux = Self {
+            vsock_path: vsock_path.clone(),
+            cmd_tx,
+            sessions,
+            quiesce_tx,
+            pong_tx,
+            emitter,
+        };
         mux.start_background(vsock_path, cmd_rx);
         mux
+    }
+
+    /// Called by vm_manager once the trajectory is open for this workspace.
+    pub fn set_emitter(&self, emitter: TraceEmitter) {
+        *self.emitter.write() = Some(emitter);
     }
 
     // ── Public API ───────────────────────────────────────────────────────────
@@ -67,6 +87,24 @@ impl SessionMux {
         Ok(())
     }
 
+    /// Store the command for a session so ExecStarted can include it.
+    /// Call this right before sending HostMessage::Exec.
+    pub fn register_exec(&self, session_id: SessionId, command: Vec<String>, cwd: String) {
+        let mut s = self.sessions.write();
+        let state = s.entry(session_id).or_insert_with(|| SessionState {
+            output_tx:   broadcast::channel(OUTPUT_BROADCAST_CAP).0,
+            exited_tx:   None,
+            output_tail: Vec::new(),
+            started_at:  std::time::Instant::now(),
+            command:     Vec::new(),
+            cwd:         String::new(),
+        });
+        state.command    = command;
+        state.cwd        = cwd;
+        state.started_at = std::time::Instant::now();
+        state.output_tail.clear();
+    }
+
     /// Subscribe to output bytes for a session.
     pub fn subscribe_output(&self, session_id: SessionId) -> broadcast::Receiver<Vec<u8>> {
         let sessions = self.sessions.read();
@@ -77,8 +115,12 @@ impl SessionMux {
         // Create entry if not yet present (guest-agent might send Started shortly)
         let (tx, rx) = broadcast::channel(OUTPUT_BROADCAST_CAP);
         self.sessions.write().insert(session_id, SessionState {
-            output_tx: tx,
-            exited_tx: None,
+            output_tx:   tx,
+            exited_tx:   None,
+            output_tail: Vec::new(),
+            started_at:  std::time::Instant::now(),
+            command:     Vec::new(),
+            cwd:         String::new(),
         });
         rx
     }
@@ -107,6 +149,7 @@ impl SessionMux {
         let sessions   = Arc::clone(&self.sessions);
         let quiesce_tx = Arc::clone(&self.quiesce_tx);
         let pong_tx    = Arc::clone(&self.pong_tx);
+        let emitter    = Arc::clone(&self.emitter);
 
         tokio::spawn(async move {
             loop {
@@ -116,6 +159,7 @@ impl SessionMux {
                     Arc::clone(&sessions),
                     Arc::clone(&quiesce_tx),
                     Arc::clone(&pong_tx),
+                    Arc::clone(&emitter),
                 ).await {
                     Ok(()) => {
                         info!("vsock connection closed cleanly");
@@ -136,6 +180,7 @@ impl SessionMux {
         sessions: Arc<RwLock<HashMap<SessionId, SessionState>>>,
         quiesce_tx: Arc<RwLock<Option<oneshot::Sender<()>>>>,
         pong_tx: Arc<RwLock<Option<oneshot::Sender<()>>>>,
+        emitter: Arc<RwLock<Option<TraceEmitter>>>,
     ) -> Result<()> {
         let stream = UnixStream::connect(vsock_path).await?;
         let (mut reader, mut writer) = tokio::io::split(stream);
@@ -162,7 +207,7 @@ impl SessionMux {
                         Ok(m)  => m,
                         Err(e) => { warn!(?e, "bad guest message"); continue; }
                     };
-                    Self::dispatch(msg, &sessions, &quiesce_tx, &pong_tx);
+                    Self::dispatch(msg, &sessions, &quiesce_tx, &pong_tx, &emitter);
                 }
             }
         }
@@ -170,36 +215,72 @@ impl SessionMux {
 
     fn dispatch(
         msg: GuestMessage,
-        sessions: &Arc<RwLock<HashMap<SessionId, SessionState>>>,
+        sessions:   &Arc<RwLock<HashMap<SessionId, SessionState>>>,
         quiesce_tx: &Arc<RwLock<Option<oneshot::Sender<()>>>>,
-        pong_tx: &Arc<RwLock<Option<oneshot::Sender<()>>>>,
+        pong_tx:    &Arc<RwLock<Option<oneshot::Sender<()>>>>,
+        emitter:    &Arc<RwLock<Option<TraceEmitter>>>,
     ) {
         match msg {
             GuestMessage::Started { session_id } => {
                 debug!(%session_id, "session started");
                 let mut s = sessions.write();
-                s.entry(session_id).or_insert_with(|| SessionState {
-                    output_tx: broadcast::channel(OUTPUT_BROADCAST_CAP).0,
-                    exited_tx: None,
+                let state = s.entry(session_id).or_insert_with(|| SessionState {
+                    output_tx:   broadcast::channel(OUTPUT_BROADCAST_CAP).0,
+                    exited_tx:   None,
+                    output_tail: Vec::new(),
+                    started_at:  std::time::Instant::now(),
+                    command:     Vec::new(),
+                    cwd:         String::new(),
                 });
+                // reset timer on each start confirmation
+                state.started_at = std::time::Instant::now();
+                // Emit ExecStarted — command was stored when the HostMessage::Exec was sent
+                if let Some(ref e) = *emitter.read() {
+                    e.emit(TraceEvent::ExecStarted {
+                        session_id,
+                        command: state.command.clone(),
+                        cwd:     state.cwd.clone(),
+                    });
+                }
             }
 
             GuestMessage::Output { session_id, data } => {
-                let s = sessions.read();
-                if let Some(entry) = s.get(&session_id) {
-                    let _ = entry.output_tx.send(data);
+                let mut s = sessions.write();
+                if let Some(entry) = s.get_mut(&session_id) {
+                    let _ = entry.output_tx.send(data.clone());
+                    // Keep only the last 4 KiB
+                    entry.output_tail.extend_from_slice(&data);
+                    let len = entry.output_tail.len();
+                    if len > 4096 {
+                        entry.output_tail.drain(..len - 4096);
+                    }
                 }
             }
 
             GuestMessage::Exited { session_id, exit_code } => {
                 debug!(%session_id, %exit_code, "session exited");
                 let mut s = sessions.write();
-                if let Some(entry) = s.get_mut(&session_id) {
+                let (duration_ms, stdout_tail) = if let Some(entry) = s.get_mut(&session_id) {
+                    let ms = entry.started_at.elapsed().as_millis() as u64;
+                    let tail = String::from_utf8_lossy(&entry.output_tail).into_owned();
                     if let Some(tx) = entry.exited_tx.take() {
                         let _ = tx.send(exit_code);
                     }
-                }
+                    (ms, tail)
+                } else {
+                    (0, String::new())
+                };
                 s.remove(&session_id);
+
+                // Emit ExecExited
+                if let Some(ref e) = *emitter.read() {
+                    e.emit(TraceEvent::ExecExited {
+                        session_id,
+                        exit_code,
+                        duration_ms,
+                        stdout_tail,
+                    });
+                }
             }
 
             GuestMessage::QuiesceOk => {

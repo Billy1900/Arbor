@@ -113,10 +113,23 @@ async fn fork_checkpoint(State(st): State<AppState>, Path(ckpt_id): Path<Uuid>, 
 {
     let ctrl = std::sync::Arc::clone(&st.controller);
     match ctrl.fork_checkpoint(CheckpointId(ckpt_id), req).await {
-        Ok((ws, op)) => (StatusCode::ACCEPTED, Json(serde_json::json!({
-            "workspace_id": ws.id, "operation_id": op.id, "state": ws.state,
-            "message": "workspace enters quarantine; reseal hooks running"
-        }))).into_response(),
+        Ok((ws, op)) => {
+            let tracer = std::sync::Arc::clone(&st.tracer);
+            let proxy_state = st.proxy_state.clone();
+            tokio::spawn(async move {
+                for _ in 0..20 {
+                    if let Some(emitter) = tracer.emitter_for(ws.id) {
+                        proxy_state.register_emitter(ws.id, emitter);
+                        return;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+                }
+            });
+            (StatusCode::ACCEPTED, Json(serde_json::json!({
+                "workspace_id": ws.id, "operation_id": op.id, "state": ws.state,
+                "message": "workspace enters quarantine; reseal hooks running"
+            }))).into_response()
+        }
         Err(e) => internal_err(e).into_response(),
     }
 }

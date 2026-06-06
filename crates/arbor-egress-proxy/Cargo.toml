@@ -23,6 +23,7 @@ tracing-subscriber = { workspace = true }
 bytes        = { workspace = true }
 futures      = { workspace = true }
 parking_lot  = { workspace = true }
+dashmap      = { workspace = true }
 uuid         = { workspace = true }
 dotenvy      = { workspace = true }
 config       = { workspace = true }
