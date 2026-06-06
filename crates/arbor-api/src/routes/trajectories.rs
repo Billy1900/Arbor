@@ -287,10 +287,49 @@ struct DiffQuery {
 
 async fn diff_rollout_attempts(
     State(st): State<AppState>,
-    Path(_rid): Path<Uuid>,
+    Path(rid): Path<Uuid>,
     Query(q):   Query<DiffQuery>,
 ) -> impl IntoResponse {
-    match st.tracer.diff_trajectories(TrajectoryId(q.a), TrajectoryId(q.b)).await {
+    let rid = RolloutId(rid);
+    let a = TrajectoryId(q.a);
+    let b = TrajectoryId(q.b);
+
+    let ta = match st.tracer.get_trajectory(a).await {
+        Ok(Some(t)) => t,
+        Ok(None) => {
+            return (StatusCode::NOT_FOUND, Json(ApiError::new(
+                "TRAJECTORY_NOT_FOUND",
+                "trajectory a not found",
+                false,
+            )))
+                .into_response();
+        }
+        Err(e) => return internal_err(anyhow::anyhow!(e)).into_response(),
+    };
+
+    let tb = match st.tracer.get_trajectory(b).await {
+        Ok(Some(t)) => t,
+        Ok(None) => {
+            return (StatusCode::NOT_FOUND, Json(ApiError::new(
+                "TRAJECTORY_NOT_FOUND",
+                "trajectory b not found",
+                false,
+            )))
+                .into_response();
+        }
+        Err(e) => return internal_err(anyhow::anyhow!(e)).into_response(),
+    };
+
+    if ta.rollout_id != Some(rid) || tb.rollout_id != Some(rid) {
+        return (StatusCode::UNPROCESSABLE_ENTITY, Json(ApiError::new(
+            "TRAJECTORY_NOT_IN_ROLLOUT",
+            "both trajectories must belong to the rollout in the URL",
+            false,
+        )))
+            .into_response();
+    }
+
+    match st.tracer.diff_trajectories(a, b).await {
         Ok(diff) => Json(diff).into_response(),
         Err(e)   => internal_err(anyhow::anyhow!(e)).into_response(),
     }
