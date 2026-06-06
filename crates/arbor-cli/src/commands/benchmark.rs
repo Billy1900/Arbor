@@ -75,11 +75,10 @@ pub async fn run(client: &ArborClient, args: BenchmarkArgs) -> Result<()> {
     spin_ready.set_message("waiting for workspaces to finish resealing…");
 
     let wait_futs: Vec<_> = rollout.workspace_ids.iter().map(|&ws_id| {
-        let client_ref = client as *const ArborClient;
         let pb = spin_ready.clone();
         let timeout = args.timeout;
         async move {
-            let result = unsafe { &*client_ref }.wait_ready(ws_id, timeout).await;
+            let result = client.wait_ready(ws_id, timeout).await;
             pb.inc(1);
             (ws_id, result)
         }
