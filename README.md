@@ -396,6 +396,8 @@ creating → ready ⟷ running → checkpointing → ready
 
 **Runner placement:** The scheduler picks the healthy runner with the lowest `used_slots` that still has available capacity (`used_slots < capacity_slots`). For checkpoint restores it additionally filters by `firecracker_version` and `cpu_template` — Firecracker requires an exact match between the host that created the snapshot and the host that restores it. Mismatches return `RUNNER_CLASS_INCOMPATIBLE` before any restore is attempted.
 
+**GPU-capable workspaces (M9 — host-mediated inference):** Firecracker has no VFIO/GPU passthrough support. Arbor's GPU model is consistent with its credential brokering philosophy: sensitive resources (GPU compute) never enter the VM. Instead, workspaces send inference requests to the sentinel hostname `gpu.local`. The egress proxy intercepts these, rewrites the URI to the local sidecar URL (llama.cpp / vLLM / Ollama running on the host), and injects an `x-arbor-model` header. The sidecar URL is never visible inside the VM. GPU runner classes (`fc-gpu-x86_64-v1`, `fc-gpu-arm64-v1`) register their `gpu_model`, `gpu_count`, and `gpu_vram_mib`. The scheduler filters for runners with free GPU slots when `runtime.gpu_count > 0`. A background `gpu_sidecar` health loop on the runner agent publishes `arbor.runner.gpu_sidecar_healthy`, `arbor.runner.gpu_available`, and `arbor.runner.gpu_vram_total_mib` metrics every 30 seconds.
+
 **ARM64 runner class (`fc-arm64-v1`):** ARM64 Graviton2 hosts use the `T2A` CPU template, not `T2`. The control plane enforces this at registration time — a runner posting `runner_class=fc-arm64-v1` with `cpu_template=T2` is rejected with `422 RUNNER_ARCH_MISMATCH`. The scheduler keeps x86_64 and aarch64 workspaces entirely separate via the `runner_class` field; a checkpoint created on an ARM64 runner can only be restored on another ARM64 runner with the same Firecracker version. Build the ARM64 guest agent and Firecracker binaries with `make guest-agent-arm64` and `make firecracker-bins-arm64`.
 
 **Drain protocol:** Draining is a two-phase handshake. The control plane marks the runner unhealthy via `PUT /internal/runners/{id}/drain` (stops new placements). The runner agent, on receiving `SIGTERM` or a local `PUT /drain` call, sets its internal drain flag (rejects new `POST /vms` with 503), then waits up to 60 seconds for in-flight VMs to finish before exiting. The control plane's 60-second heartbeat timeout acts as the backstop if the runner exits uncleanly.
@@ -416,7 +418,7 @@ creating → ready ⟷ running → checkpointing → ready
 | M6 | Multi-runner pool + Prometheus + Helm | ✅ Complete |
 | M7 | Diff snapshots (Firecracker GA) | ⏸ Blocked — diff snapshots remain upstream developer preview |
 | M8 | ARM64 runner class | ✅ Complete |
-| M9 | GPU passthrough runner | 📋 Planned |
+| M9 | GPU-capable workspaces via host-mediated inference | ✅ Complete |
 
 ---
 

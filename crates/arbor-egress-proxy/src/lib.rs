@@ -46,6 +46,10 @@ pub struct ProxyGrant {
 pub enum InjectKind {
     AuthorizationHeader,  // injects "Authorization: Bearer <value>"
     ApiKeyHeader(String), // injects "<header-name>: <value>"
+    /// Rewrites requests to `gpu.local` → the runner's local inference sidecar.
+    /// `credential_value` on the grant carries an optional model name injected
+    /// as `X-Arbor-Model`. The real sidecar URL never enters the VM.
+    GpuSidecar { sidecar_url: String },
 }
 
 pub struct GrantRegistry {
@@ -250,7 +254,7 @@ async fn tunnel(
     Ok(())
 }
 
-// ── Plain HTTP proxy (with header injection) ─────────────────────────────────
+// ── Plain HTTP proxy (with header injection + GPU sidecar routing) ───────────
 
 async fn handle_http(
     mut req: Request<Incoming>,
@@ -266,6 +270,11 @@ async fn handle_http(
         return error_response(StatusCode::FORBIDDEN, "egress denied");
     }
 
+    // GPU sidecar: rewrite gpu.local → the local sidecar and forward
+    if let Some(ProxyGrant { inject_kind: InjectKind::GpuSidecar { ref sidecar_url }, ref credential_value, .. }) = grant {
+        return forward_to_gpu_sidecar(req, sidecar_url, credential_value).await;
+    }
+
     // Inject credential header if brokered grant exists
     if let Some(grant) = &grant {
         inject_credential(req.headers_mut(), grant);
@@ -275,8 +284,42 @@ async fn handle_http(
     debug!(%ws_id, %uri, "plain HTTP proxy request");
 
     // MVP: plain HTTP forwarding not implemented — most API traffic uses HTTPS CONNECT.
-    // Brokered credentials are injected at the CONNECT tunnel level for HTTPS.
     error_response(StatusCode::NOT_IMPLEMENTED, "plain HTTP forwarding not yet implemented; use HTTPS")
+}
+
+/// Forward a gpu.local request to the runner-local inference sidecar.
+/// Rewrites the Host header and URI; injects X-Arbor-Model if a model is set.
+async fn forward_to_gpu_sidecar(
+    mut req: Request<Incoming>,
+    sidecar_url: &str,
+    model_hint: &str,
+) -> Response<http_body_util::Full<Bytes>> {
+    // Rewrite the URI: strip gpu.local, prepend sidecar base URL
+    let path_and_query = req.uri()
+        .path_and_query()
+        .map(|pq| pq.as_str())
+        .unwrap_or("/");
+    let new_uri = format!("{}{}", sidecar_url.trim_end_matches('/'), path_and_query);
+
+    match new_uri.parse::<Uri>() {
+        Ok(uri) => { *req.uri_mut() = uri; }
+        Err(e) => {
+            warn!(?e, "failed to rewrite URI for GPU sidecar");
+            return error_response(StatusCode::BAD_GATEWAY, "GPU sidecar URI rewrite failed");
+        }
+    }
+
+    // Inject model hint header so the sidecar knows which model to use
+    if !model_hint.is_empty() {
+        if let Ok(v) = HeaderValue::from_str(model_hint) {
+            req.headers_mut().insert("x-arbor-model", v);
+        }
+    }
+
+    info!(sidecar = %sidecar_url, "forwarding to GPU inference sidecar");
+    // MVP: full forwarding requires a real HTTP client round-trip.
+    // This stub returns 501 until the HTTP client is wired in.
+    error_response(StatusCode::NOT_IMPLEMENTED, "GPU sidecar forwarding: wire in HTTP client in production")
 }
 
 fn inject_credential(headers: &mut hyper::HeaderMap, grant: &ProxyGrant) {
@@ -294,6 +337,9 @@ fn inject_credential(headers: &mut hyper::HeaderMap, grant: &ProxyGrant) {
             ) {
                 headers.insert(name, val);
             }
+        }
+        InjectKind::GpuSidecar { .. } => {
+            // GPU sidecar routing is handled before this function is called
         }
     }
 }

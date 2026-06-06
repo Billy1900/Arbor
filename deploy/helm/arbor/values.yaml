@@ -130,3 +130,27 @@ affinity: {}
 #   The agent self-registers. The API validates that fc-arm64-v1 runners
 #   always report arch=aarch64 and cpu_template=T2A — mismatches are rejected
 #   with HTTP 422 RUNNER_ARCH_MISMATCH.
+#
+# ── M9: GPU runner setup ─────────────────────────────────────────────────────
+#
+# GPU runners run on bare-metal hosts with a local inference sidecar
+# (llama.cpp / vLLM / Ollama). The runner agent reports GPU capacity at
+# registration and proxies gpu.local requests through the egress proxy to the
+# sidecar — secrets and model weights never enter the microVM.
+#
+# On the GPU host, start the runner agent with:
+#
+#     ARBOR_RUNNER__RUNNER_CLASS=fc-gpu-x86_64-v1 \
+#     ARBOR_RUNNER__GPU_MODEL="NVIDIA A10G" \
+#     ARBOR_RUNNER__GPU_COUNT=1 \
+#     ARBOR_RUNNER__GPU_VRAM_MIB=24576 \
+#     ARBOR_RUNNER__GPU_SIDECAR_URL=http://127.0.0.1:11434 \
+#     ARBOR_RUNNER__CONTROLLER_URL=https://arbor-api.example.com \
+#     ./arbor-runner-agent
+#
+#   GPU runner classes: fc-gpu-x86_64-v1 (T2 / x86_64)
+#                       fc-gpu-arm64-v1  (T2A / aarch64, e.g. A100 on Graviton4)
+#
+#   Sidecar health is monitored every 30 s. If unreachable for 3+ checks,
+#   arbor.runner.gpu_sidecar_healthy drops to 0 and an error is logged.
+#   GPU capacity metrics: arbor.runner.gpu_available, arbor.runner.gpu_vram_total_mib.

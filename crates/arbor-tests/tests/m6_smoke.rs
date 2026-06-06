@@ -26,6 +26,10 @@ mod tests {
             used_slots:          3,
             healthy:             true,
             last_heartbeat:      Utc::now(),
+            gpu_model:           None,
+            gpu_count:           0,
+            gpu_used:            0,
+            gpu_vram_mib:        0,
         };
         assert_eq!(r.available_slots(), 7);
     }
@@ -43,6 +47,10 @@ mod tests {
             used_slots:          5,
             healthy:             true,
             last_heartbeat:      Utc::now(),
+            gpu_model:           None,
+            gpu_count:           0,
+            gpu_used:            0,
+            gpu_vram_mib:        0,
         };
         assert_eq!(r.available_slots(), 0, "full runner must have 0 available slots");
     }
@@ -61,6 +69,10 @@ mod tests {
             used_slots:          7, // over-full
             healthy:             true,
             last_heartbeat:      Utc::now(),
+            gpu_model:           None,
+            gpu_count:           0,
+            gpu_used:            0,
+            gpu_vram_mib:        0,
         };
         assert_eq!(r.available_slots(), 0,
             "available_slots must use saturating_sub, not panic on underflow");
@@ -228,6 +240,10 @@ mod tests {
             used_slots:          2,
             healthy:             true,
             last_heartbeat:      Utc::now(),
+            gpu_model:           None,
+            gpu_count:           0,
+            gpu_used:            0,
+            gpu_vram_mib:        0,
         };
 
         let v: Value = serde_json::to_value(&node).expect("serialize RunnerNode");

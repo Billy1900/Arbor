@@ -85,7 +85,7 @@ impl Controller {
 
     async fn drive_create_workspace(&self, ws_id: WorkspaceId, op_id: OperationId) -> Result<()> {
         let ws = self.db.get_workspace(ws_id).await?.context("workspace vanished")?;
-        let runner = self.scheduler.pick_runner(&ws.runtime.runner_class, &ws.compatibility_key).await?;
+        let runner = self.scheduler.pick_runner(&ws.runtime.runner_class, &ws.compatibility_key, ws.runtime.gpu_count).await?;
         self.db.increment_runner_slots(runner.id).await?;
 
         let rootfs_path = format!("/var/lib/arbor/workspaces/{}/rootfs.overlay.raw", ws_id);
@@ -286,7 +286,7 @@ impl Controller {
             runtime: RuntimeConfig {
                 runner_class: ckpt.compatibility_key.0["runner_class"]
                     .as_str().unwrap_or("fc-x86_64-v1").to_string(),
-                vcpu_count: 2, memory_mib: 2048, disk_gb: 30,
+                vcpu_count: 2, memory_mib: 2048, disk_gb: 30, gpu_count: 0,
             },
             compatibility_key: ckpt.compatibility_key.clone(),
             current_checkpoint_id: Some(ckpt_id),
@@ -334,7 +334,7 @@ impl Controller {
             runtime: RuntimeConfig {
                 runner_class: ckpt.compatibility_key.0["runner_class"]
                     .as_str().unwrap_or("fc-x86_64-v1").to_string(),
-                vcpu_count: 2, memory_mib: 2048, disk_gb: 30,
+                vcpu_count: 2, memory_mib: 2048, disk_gb: 30, gpu_count: 0,
             },
             compatibility_key: ckpt.compatibility_key.clone(),
             current_checkpoint_id: Some(ckpt_id),

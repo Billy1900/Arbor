@@ -44,6 +44,10 @@ mod tests {
             used_slots:          used,
             healthy:             true,
             last_heartbeat:      Utc::now(),
+            gpu_model:           None,
+            gpu_count:           0,
+            gpu_used:            0,
+            gpu_vram_mib:        0,
         }
     }
 
@@ -262,7 +266,7 @@ mod tests {
 
         // All runners for this class are full — scheduler must return an error
         // We verify by using a class that has no registered runners at all.
-        let result = scheduler.pick_runner("fc-x86_64-nonexistent-class", &ck).await;
+        let result = scheduler.pick_runner("fc-x86_64-nonexistent-class", &ck, 0).await;
         assert!(result.is_err(), "pick_runner must error when no healthy runner is available");
         let msg = result.unwrap_err().to_string();
         assert!(

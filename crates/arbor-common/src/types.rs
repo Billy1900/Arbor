@@ -86,6 +86,10 @@ pub struct RuntimeConfig {
     pub vcpu_count: u32,
     pub memory_mib: u32,
     pub disk_gb: u32,
+    /// Number of GPUs to allocate (0 = CPU-only workspace).
+    /// Requires a `fc-gpu-*` runner class when non-zero.
+    #[serde(default)]
+    pub gpu_count: u32,
 }
 
 // ── Compatibility key ────────────────────────────────────────────────────────
@@ -113,6 +117,32 @@ impl CompatibilityKey {
             "guest_kernel_hash": guest_kernel_hash,
             "base_image_id": base_image_id,
             "block_layout_version": block_layout_version,
+        }))
+    }
+
+    /// Compatibility key for GPU-capable runner classes.
+    /// Includes `gpu_model` — snapshots are GPU-model-specific because
+    /// inference results can differ across GPU generations.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_gpu(
+        runner_class: &str,
+        arch: &str,
+        cpu_template: &str,
+        firecracker_version: &str,
+        guest_kernel_hash: &str,
+        base_image_id: &str,
+        block_layout_version: u32,
+        gpu_model: &str,
+    ) -> Self {
+        Self(serde_json::json!({
+            "runner_class": runner_class,
+            "arch": arch,
+            "cpu_template": cpu_template,
+            "firecracker_version": firecracker_version,
+            "guest_kernel_hash": guest_kernel_hash,
+            "base_image_id": base_image_id,
+            "block_layout_version": block_layout_version,
+            "gpu_model": gpu_model,
         }))
     }
 
@@ -252,11 +282,27 @@ pub struct RunnerNode {
     pub used_slots: u32,
     pub healthy: bool,
     pub last_heartbeat: DateTime<Utc>,
+    /// GPU model string, e.g. "NVIDIA A10G". None for CPU-only runners.
+    #[serde(default)]
+    pub gpu_model: Option<String>,
+    /// Total number of GPUs on this runner host.
+    #[serde(default)]
+    pub gpu_count: u32,
+    /// GPUs currently allocated to running workspaces.
+    #[serde(default)]
+    pub gpu_used: u32,
+    /// VRAM per GPU in MiB (e.g. 24576 for 24 GiB).
+    #[serde(default)]
+    pub gpu_vram_mib: u32,
 }
 
 impl RunnerNode {
     pub fn available_slots(&self) -> u32 {
         self.capacity_slots.saturating_sub(self.used_slots)
+    }
+
+    pub fn available_gpu_slots(&self) -> u32 {
+        self.gpu_count.saturating_sub(self.gpu_used)
     }
 }
 
@@ -267,6 +313,9 @@ impl RunnerNode {
 pub enum SecretMode {
     BrokeredProxy,
     EphemeralEnv,
+    /// Routes agent calls to `http://gpu.local/...` through the runner's
+    /// local GPU inference sidecar. The real sidecar URL never enters the VM.
+    GpuSidecar,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

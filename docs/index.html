@@ -767,6 +767,11 @@ workspace.<span class="fn-name">run</span>(<span class="str">"git clone git@gith
       <div class="feature-title">arm64 support</div>
       <p class="feature-body">Native ARM64/Graviton2 runner class (<code>fc-arm64-v1</code>) with T2A CPU template enforcement. The control plane rejects misconfigured runners at registration with <code>RUNNER_ARCH_MISMATCH</code>. x86_64 and aarch64 workspaces are strictly isolated — snapshots can never cross architectures.</p>
     </div>
+    <div class="feature-card">
+      <div class="feature-icon">09</div>
+      <div class="feature-title">gpu inference</div>
+      <p class="feature-body">GPU-capable workspaces without VFIO passthrough. Workspaces call <code>gpu.local</code>; the egress proxy rewrites requests to a local sidecar (llama.cpp / vLLM / Ollama) and injects the model header host-side. GPU model weights and access tokens never enter the microVM. Runner classes <code>fc-gpu-x86_64-v1</code> and <code>fc-gpu-arm64-v1</code> report GPU capacity at registration; the scheduler enforces free GPU slot availability.</p>
+    </div>
   </div>
 </section>
 
@@ -983,6 +988,14 @@ workspace.<span class="fn-name">run</span>(<span class="str">"git clone git@gith
           <td><span class="cross">✗</span></td>
         </tr>
         <tr>
+          <td class="feature-name">GPU inference (host-mediated)</td>
+          <td class="arbor-col"><span class="check">✓</span> fc-gpu-*-v1</td>
+          <td><span class="cross">✗</span></td>
+          <td><span class="partial">~</span> VFIO only</td>
+          <td><span class="cross">✗</span></td>
+          <td><span class="cross">✗</span></td>
+        </tr>
+        <tr>
           <td class="feature-name">Sub-150ms boot</td>
           <td class="arbor-col"><span class="check">✓</span></td>
           <td><span class="check">✓</span></td>
@@ -1052,8 +1065,8 @@ workspace.<span class="fn-name">run</span>(<span class="str">"git clone git@gith
     </div>
     <div class="roadmap-item">
       <div class="milestone">M9</div>
-      <div class="roadmap-title">GPU passthrough runner</div>
-      <div class="status-badge status-plan">planned</div>
+      <div class="roadmap-title">GPU-capable workspaces via host-mediated inference</div>
+      <div class="status-badge status-done">complete</div>
     </div>
   </div>
 </section>

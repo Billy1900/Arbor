@@ -26,6 +26,12 @@ pub enum ArborError {
     #[error("runner arch mismatch: runner_class requires arch={expected}, got {got}")]
     RunnerArchMismatch { expected: String, got: String },
 
+    #[error("GPU capacity exhausted for runner class {runner_class}")]
+    GpuCapacityExhausted { runner_class: String },
+
+    #[error("GPU inference sidecar unavailable: {0}")]
+    GpuSidecarUnavailable(String),
+
     #[error("checkpoint not sealed: {0}")]
     CheckpointNotSealed(String),
 
@@ -71,6 +77,8 @@ impl ArborError {
             Self::RunnerCapacityExhausted { .. } => "RUNNER_CAPACITY_EXHAUSTED",
             Self::RunnerClassIncompatible { .. } => "RUNNER_CLASS_INCOMPATIBLE",
             Self::RunnerArchMismatch { .. } => "RUNNER_ARCH_MISMATCH",
+            Self::GpuCapacityExhausted { .. } => "GPU_CAPACITY_EXHAUSTED",
+            Self::GpuSidecarUnavailable(_) => "GPU_SIDECAR_UNAVAILABLE",
             Self::CheckpointNotSealed(_) => "CHECKPOINT_NOT_SEALED",
             Self::CheckpointArtifactMissing(_) => "CHECKPOINT_ARTIFACT_MISSING",
             Self::ResealFailed(_) => "RESUME_RESEAL_FAILED",
@@ -86,7 +94,13 @@ impl ArborError {
     }
 
     pub fn retryable(&self) -> bool {
-        matches!(self, Self::RunnerCapacityExhausted { .. } | Self::Database(_) | Self::Internal(_))
+        matches!(self,
+            Self::RunnerCapacityExhausted { .. }
+            | Self::GpuCapacityExhausted { .. }
+            | Self::GpuSidecarUnavailable(_)
+            | Self::Database(_)
+            | Self::Internal(_)
+        )
     }
 
     pub fn http_status(&self) -> u16 {
@@ -96,7 +110,9 @@ impl ArborError {
             Self::WorkspaceBusy { .. } | Self::RunnerClassIncompatible { .. }
             | Self::CheckpointNotSealed(_) => 409,
             Self::RunnerArchMismatch { .. } => 422,
-            Self::RunnerCapacityExhausted { .. } => 503,
+            Self::RunnerCapacityExhausted { .. }
+            | Self::GpuCapacityExhausted { .. }
+            | Self::GpuSidecarUnavailable(_) => 503,
             Self::UnsupportedInMvp(_) => 501,
             Self::SecretPolicyDenied(_) | Self::EgressDenied(_) => 403,
             _ => 500,

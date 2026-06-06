@@ -21,6 +21,9 @@ SQLX_OFFLINE=true cargo test -p arbor-runner-agent  # drain flag + ARM64 config 
 # Run M8 ARM64 tests (no DB)
 SQLX_OFFLINE=true cargo test -p arbor-tests --test m8_arm64_tests
 
+# Run M9 GPU tests (no DB)
+SQLX_OFFLINE=true cargo test -p arbor-tests --test m9_gpu_tests
+
 # Or use the Makefile shortcuts
 make test-m6
 make test-m8
@@ -82,6 +85,8 @@ Arbor is a Rust workspace that provides Firecracker-microVM-backed agent sandbox
 
 **Prometheus metrics (M6)**: Both services expose `GET /metrics`. Runner-agent metrics: `arbor.runner.active_vms` (gauge), `arbor.runner.vm_boots_total`, `arbor.runner.vm_boot_duration_seconds` (histogram), `arbor.runner.checkpoints_total`, `arbor.runner.restores_total`. API metrics: `arbor.checkpoint.created`, `arbor.fork.created`, `arbor.restore.completed`, `arbor.runner.unhealthy`, `arbor.runner.drain_initiated`.
 
+**GPU-capable workspaces (M9)**: Firecracker has no GPU passthrough. Arbor uses host-mediated inference: workspaces call `gpu.local` which the egress proxy rewrites to the local sidecar URL (llama.cpp / vLLM / Ollama). Runner classes `fc-gpu-x86_64-v1` and `fc-gpu-arm64-v1` register `gpu_model`, `gpu_count`, `gpu_vram_mib`. The scheduler's `pick_runner()` filters for free GPU slots when `runtime.gpu_count > 0`. The `gpu_sidecar` module publishes health and capacity metrics every 30s. GPU secrets use `SecretMode::GpuSidecar` and `InjectKind::GpuSidecar`.
+
 ### Runner-agent environment variables
 
 | Variable | Default | Description |
@@ -94,6 +99,10 @@ Arbor is a Rust workspace that provides Firecracker-microVM-backed agent sandbox
 | `ARBOR_RUNNER__FIRECRACKER_VERSION` | `1.9.0` | Reported FC version (must match binary) |
 | `ARBOR_RUNNER__CPU_TEMPLATE` | `T2` | CPU template: `T2` for x86_64, `T2A` for aarch64/Graviton2 |
 | `ARBOR_RUNNER__ARCH` | `x86_64` | Host architecture: `x86_64` or `aarch64` |
+| `ARBOR_RUNNER__GPU_MODEL` | _(unset)_ | GPU model string (e.g. `"NVIDIA A10G"`). Required for `fc-gpu-*` classes. |
+| `ARBOR_RUNNER__GPU_COUNT` | `0` | Number of GPUs on this host. `0` = CPU-only runner. |
+| `ARBOR_RUNNER__GPU_VRAM_MIB` | `0` | VRAM per GPU in MiB (e.g. `24576` for 24 GiB A10G). |
+| `ARBOR_RUNNER__GPU_SIDECAR_URL` | _(unset)_ | Base URL of local inference sidecar (e.g. `http://127.0.0.1:11434`). Required when `gpu_count > 0`. |
 
 ### Database
 

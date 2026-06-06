@@ -238,6 +238,10 @@ mod tests {
             used_slots:          0,
             healthy:             true,
             last_heartbeat:      chrono::Utc::now(),
+            gpu_model:           None,
+            gpu_count:           0,
+            gpu_used:            0,
+            gpu_vram_mib:        0,
         };
         let v: Value = serde_json::to_value(&node).unwrap();
         assert_eq!(v["runner_class"], "fc-arm64-v1");

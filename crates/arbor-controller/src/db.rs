@@ -65,6 +65,7 @@ impl Db {
                     vcpu_count:   r.get::<i32,_>("vcpu_count") as u32,
                     memory_mib:   r.get::<i32,_>("memory_mib") as u32,
                     disk_gb:      r.get::<i32,_>("disk_gb") as u32,
+                    gpu_count:    0,
                 },
                 compatibility_key: CompatibilityKey(r.get("compatibility_key")),
                 current_checkpoint_id: r.get::<Option<Uuid>,_>("current_checkpoint_id").map(CheckpointId),
@@ -245,7 +246,8 @@ impl Db {
     pub async fn list_healthy_runners(&self, runner_class: &str) -> Result<Vec<RunnerNode>> {
         let rows = sqlx::query(
             "SELECT id, runner_class, address, arch, firecracker_version, cpu_template,
-                    capacity_slots, used_slots, healthy, last_heartbeat
+                    capacity_slots, used_slots, healthy, last_heartbeat,
+                    gpu_model, gpu_count, gpu_used, gpu_vram_mib
              FROM runner_nodes
              WHERE runner_class = $1 AND healthy = true AND used_slots < capacity_slots
              ORDER BY used_slots ASC"
@@ -253,10 +255,35 @@ impl Db {
         Ok(rows.into_iter().map(row_to_runner).collect())
     }
 
+    /// List healthy GPU runners with at least `gpu_needed` free GPU slots.
+    pub async fn list_healthy_gpu_runners(
+        &self,
+        runner_class: &str,
+        gpu_needed: u32,
+    ) -> Result<Vec<RunnerNode>> {
+        let rows = sqlx::query(
+            "SELECT id, runner_class, address, arch, firecracker_version, cpu_template,
+                    capacity_slots, used_slots, healthy, last_heartbeat,
+                    gpu_model, gpu_count, gpu_used, gpu_vram_mib
+             FROM runner_nodes
+             WHERE runner_class = $1
+               AND healthy = true
+               AND used_slots < capacity_slots
+               AND gpu_count > 0
+               AND (gpu_count - gpu_used) >= $2
+             ORDER BY gpu_used ASC"
+        )
+        .bind(runner_class)
+        .bind(gpu_needed as i32)
+        .fetch_all(&self.pool).await?;
+        Ok(rows.into_iter().map(row_to_runner).collect())
+    }
+
     pub async fn list_all_runners(&self) -> Result<Vec<RunnerNode>> {
         let rows = sqlx::query(
             "SELECT id, runner_class, address, arch, firecracker_version, cpu_template,
-                    capacity_slots, used_slots, healthy, last_heartbeat
+                    capacity_slots, used_slots, healthy, last_heartbeat,
+                    gpu_model, gpu_count, gpu_used, gpu_vram_mib
              FROM runner_nodes ORDER BY runner_class, used_slots ASC"
         ).fetch_all(&self.pool).await?;
         Ok(rows.into_iter().map(row_to_runner).collect())
@@ -265,7 +292,8 @@ impl Db {
     pub async fn get_runner(&self, id: RunnerId) -> Result<Option<RunnerNode>> {
         let row = sqlx::query(
             "SELECT id, runner_class, address, arch, firecracker_version, cpu_template,
-                    capacity_slots, used_slots, healthy, last_heartbeat
+                    capacity_slots, used_slots, healthy, last_heartbeat,
+                    gpu_model, gpu_count, gpu_used, gpu_vram_mib
              FROM runner_nodes WHERE id = $1"
         ).bind(id.0).fetch_optional(&self.pool).await?;
         Ok(row.map(row_to_runner))
@@ -304,17 +332,40 @@ impl Db {
         Ok(())
     }
 
+    pub async fn increment_runner_gpu(&self, id: RunnerId) -> Result<()> {
+        sqlx::query(
+            "UPDATE runner_nodes SET gpu_used = gpu_used + 1 WHERE id = $1"
+        ).bind(id.0).execute(&self.pool).await?;
+        Ok(())
+    }
+
+    pub async fn decrement_runner_gpu(&self, id: RunnerId) -> Result<()> {
+        sqlx::query(
+            "UPDATE runner_nodes SET gpu_used = GREATEST(0, gpu_used - 1) WHERE id = $1"
+        ).bind(id.0).execute(&self.pool).await?;
+        Ok(())
+    }
+
     pub async fn upsert_runner(&self, node: &RunnerNode) -> Result<()> {
         sqlx::query(
             "INSERT INTO runner_nodes
-             (id, runner_class, address, arch, firecracker_version, cpu_template, capacity_slots)
-             VALUES ($1,$2,$3,$4,$5,$6,$7)
+             (id, runner_class, address, arch, firecracker_version, cpu_template,
+              capacity_slots, gpu_model, gpu_count, gpu_vram_mib)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
              ON CONFLICT (id) DO UPDATE
-             SET address = EXCLUDED.address, healthy = true, last_heartbeat = now()"
+             SET address      = EXCLUDED.address,
+                 gpu_model    = EXCLUDED.gpu_model,
+                 gpu_count    = EXCLUDED.gpu_count,
+                 gpu_vram_mib = EXCLUDED.gpu_vram_mib,
+                 healthy      = true,
+                 last_heartbeat = now()"
         )
         .bind(node.id.0).bind(&node.runner_class).bind(&node.address)
         .bind(&node.arch).bind(&node.firecracker_version).bind(&node.cpu_template)
         .bind(node.capacity_slots as i32)
+        .bind(&node.gpu_model)
+        .bind(node.gpu_count as i32)
+        .bind(node.gpu_vram_mib as i32)
         .execute(&self.pool).await?;
         Ok(())
     }
@@ -350,7 +401,7 @@ impl Db {
              SET active = EXCLUDED.active, expires_at = EXCLUDED.expires_at"
         )
         .bind(grant.id.0).bind(grant.workspace_id.0).bind(&grant.provider)
-        .bind(match grant.mode { SecretMode::BrokeredProxy => "brokered_proxy", SecretMode::EphemeralEnv => "ephemeral_env" })
+        .bind(match grant.mode { SecretMode::BrokeredProxy => "brokered_proxy", SecretMode::EphemeralEnv => "ephemeral_env", SecretMode::GpuSidecar => "gpu_sidecar" })
         .bind(&grant.vault_ref).bind(&grant.allowed_hosts)
         .bind(grant.ttl_seconds as i32).bind(grant.active)
         .bind(grant.expires_at).bind(grant.created_at)
@@ -432,5 +483,9 @@ fn row_to_runner(r: sqlx::postgres::PgRow) -> RunnerNode {
         used_slots:          r.get::<i32,_>("used_slots") as u32,
         healthy:             r.get("healthy"),
         last_heartbeat:      r.get("last_heartbeat"),
+        gpu_model:           r.get("gpu_model"),
+        gpu_count:           r.get::<i32,_>("gpu_count") as u32,
+        gpu_used:            r.get::<i32,_>("gpu_used") as u32,
+        gpu_vram_mib:        r.get::<i32,_>("gpu_vram_mib") as u32,
     }
 }

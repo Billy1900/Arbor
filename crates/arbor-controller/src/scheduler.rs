@@ -14,12 +14,27 @@ impl Scheduler {
     pub fn new(db: Arc<Db>) -> Self { Self { db } }
 
     /// Pick a healthy runner with available capacity for a new workspace.
+    /// When `gpu_count > 0`, requires a `fc-gpu-*` runner class with free GPU slots.
     #[instrument(skip(self, _compat_key))]
     pub async fn pick_runner(
         &self,
         runner_class: &str,
         _compat_key: &CompatibilityKey,
+        gpu_count: u32,
     ) -> Result<RunnerNode> {
+        if gpu_count > 0 {
+            let candidates = self.db
+                .list_healthy_gpu_runners(runner_class, gpu_count)
+                .await
+                .context("list healthy GPU runners")?;
+
+            return candidates.into_iter()
+                .find(|r| r.available_slots() > 0 && r.available_gpu_slots() >= gpu_count)
+                .ok_or_else(|| anyhow::anyhow!(ArborError::GpuCapacityExhausted {
+                    runner_class: runner_class.to_string(),
+                }));
+        }
+
         let candidates = self.db.list_healthy_runners(runner_class).await
             .context("list healthy runners")?;
 

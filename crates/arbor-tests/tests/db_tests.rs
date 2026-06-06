@@ -43,7 +43,7 @@ mod tests {
             },
             runtime: RuntimeConfig {
                 runner_class: "fc-x86_64-v1".into(),
-                vcpu_count: 2, memory_mib: 2048, disk_gb: 20,
+                vcpu_count: 2, memory_mib: 2048, disk_gb: 20, gpu_count: 0,
             },
             compatibility_key: CompatibilityKey::new(
                 "fc-x86_64-v1","x86_64","T2","1.9.0","sha256:abc","ubuntu-24.04-dev-v1",1,
@@ -73,7 +73,7 @@ mod tests {
         let ws = Workspace {
             id, name: "state-test".into(), state: WorkspaceState::Creating,
             repo: RepoConfig { provider: "".into(), url: "".into(), r#ref: "".into(), commit: None },
-            runtime: RuntimeConfig { runner_class: "fc-x86_64-v1".into(), vcpu_count: 2, memory_mib: 2048, disk_gb: 20 },
+            runtime: RuntimeConfig { runner_class: "fc-x86_64-v1".into(), vcpu_count: 2, memory_mib: 2048, disk_gb: 20, gpu_count: 0 },
             compatibility_key: CompatibilityKey::new("fc-x86_64-v1","x86_64","T2","1.9.0","sha256:abc","img",1),
             current_checkpoint_id: None, runner_id: None,
             identity_epoch: 0, network_epoch: 0, created_at: now, updated_at: now,
@@ -102,7 +102,7 @@ mod tests {
         let ws = Workspace {
             id: ws_id, name: "ckpt-ws".into(), state: WorkspaceState::Ready,
             repo: RepoConfig { provider: "".into(), url: "".into(), r#ref: "".into(), commit: None },
-            runtime: RuntimeConfig { runner_class: "fc-x86_64-v1".into(), vcpu_count: 2, memory_mib: 2048, disk_gb: 20 },
+            runtime: RuntimeConfig { runner_class: "fc-x86_64-v1".into(), vcpu_count: 2, memory_mib: 2048, disk_gb: 20, gpu_count: 0 },
             compatibility_key: CompatibilityKey::new("fc-x86_64-v1","x86_64","T2","1.9.0","sha256:abc","img",1),
             current_checkpoint_id: None, runner_id: None,
             identity_epoch: 3, network_epoch: 3, created_at: now, updated_at: now,
@@ -154,7 +154,7 @@ mod tests {
         let ws = Workspace {
             id, name: "epoch-test".into(), state: WorkspaceState::Ready,
             repo: RepoConfig { provider: "".into(), url: "".into(), r#ref: "".into(), commit: None },
-            runtime: RuntimeConfig { runner_class: "fc-x86_64-v1".into(), vcpu_count: 2, memory_mib: 2048, disk_gb: 20 },
+            runtime: RuntimeConfig { runner_class: "fc-x86_64-v1".into(), vcpu_count: 2, memory_mib: 2048, disk_gb: 20, gpu_count: 0 },
             compatibility_key: CompatibilityKey::new("fc-x86_64-v1","x86_64","T2","1.9.0","sha256:abc","img",1),
             current_checkpoint_id: None, runner_id: None,
             identity_epoch: 5, network_epoch: 5, created_at: now, updated_at: now,
@@ -182,7 +182,7 @@ mod tests {
         let ws = Workspace {
             id: ws_id, name: "grant-test".into(), state: WorkspaceState::Ready,
             repo: RepoConfig { provider: "".into(), url: "".into(), r#ref: "".into(), commit: None },
-            runtime: RuntimeConfig { runner_class: "fc-x86_64-v1".into(), vcpu_count: 2, memory_mib: 2048, disk_gb: 20 },
+            runtime: RuntimeConfig { runner_class: "fc-x86_64-v1".into(), vcpu_count: 2, memory_mib: 2048, disk_gb: 20, gpu_count: 0 },
             compatibility_key: CompatibilityKey::new("fc-x86_64-v1","x86_64","T2","1.9.0","sha256:abc","img",1),
             current_checkpoint_id: None, runner_id: None,
             identity_epoch: 0, network_epoch: 0, created_at: now, updated_at: now,
@@ -228,6 +228,7 @@ mod tests {
             cpu_template: "T2".into(),
             capacity_slots: 10, used_slots: 0,
             healthy: true, last_heartbeat: chrono::Utc::now(),
+            gpu_model: None, gpu_count: 0, gpu_used: 0, gpu_vram_mib: 0,
         };
         db.upsert_runner(&node).await.unwrap();
 

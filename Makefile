@@ -1,7 +1,7 @@
 .PHONY: build check test test-unit test-integration fmt lint clean \
         docker-up docker-down db-setup db-reset \
         guest-agent guest-agent-arm64 \
-        image image-arm64 \
+        image image-arm64 image-gpu \
         firecracker-bins firecracker-bins-arm64 \
         help
 
@@ -24,6 +24,7 @@ help:
 	@echo "  make guest-agent-arm64   Build static musl guest-agent (aarch64)"
 	@echo "  make image               Build Ubuntu 24.04 guest rootfs x86_64 (requires root)"
 	@echo "  make image-arm64         Build Ubuntu 24.04 guest rootfs aarch64 (requires root)"
+	@echo "  make image-gpu           Build Ubuntu 24.04 GPU guest rootfs x86_64 (requires root)"
 	@echo "  make firecracker-bins        Download Firecracker + Jailer (x86_64)"
 	@echo "  make firecracker-bins-arm64  Download Firecracker + Jailer (aarch64)"
 
@@ -132,6 +133,12 @@ image-arm64: guest-agent-arm64
 	cp target/aarch64-unknown-linux-musl/release/arbor-guest-agent \
 		images/ubuntu-24.04-dev/arbor-guest-agent
 	sudo ARCH=aarch64 bash images/ubuntu-24.04-dev/build.sh
+
+image-gpu: guest-agent
+	@echo "Building Ubuntu 24.04 GPU guest rootfs (x86_64, requires root)..."
+	cp target/x86_64-unknown-linux-musl/release/arbor-guest-agent \
+		images/ubuntu-24.04-dev/arbor-guest-agent
+	sudo GPU=1 bash images/ubuntu-24.04-dev/build.sh
 
 # ── Firecracker binaries ──────────────────────────────────────────────────────
 

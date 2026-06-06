@@ -1,5 +1,6 @@
 #![allow(dead_code, unused_variables, unused_imports)]
 mod fc_client;
+mod gpu_sidecar;
 mod netns;
 mod session_mux;
 mod vm_manager;
@@ -57,6 +58,21 @@ struct AgentConfig {
     /// The address the controller uses to reach this agent (e.g. http://10.0.0.5:9090)
     #[serde(default)]
     advertise_address: Option<String>,
+
+    // M9: GPU sidecar
+    /// GPU model string reported to the controller (e.g. "NVIDIA A10G"). Empty = no GPU.
+    #[serde(default)]
+    gpu_model: Option<String>,
+    /// Total number of GPUs on this host (0 = CPU-only runner).
+    #[serde(default)]
+    gpu_count: u32,
+    /// VRAM per GPU in MiB (e.g. 24576 for 24 GiB A10G).
+    #[serde(default)]
+    gpu_vram_mib: u32,
+    /// Base URL of the local GPU inference sidecar (e.g. http://127.0.0.1:11434).
+    /// Required when gpu_count > 0.
+    #[serde(default)]
+    gpu_sidecar_url: Option<String>,
 }
 
 fn default_bind()         -> String { "0.0.0.0:9090".into() }
@@ -121,7 +137,23 @@ async fn main() -> Result<()> {
             &cfg.firecracker_version,
             &cfg.cpu_template,
             &cfg.arch,
+            cfg.gpu_model.as_deref(),
+            cfg.gpu_count,
+            cfg.gpu_vram_mib,
         ).await.context("failed to register with controller")?;
+
+        // GPU sidecar health loop (only on GPU runners)
+        if cfg.gpu_count > 0 {
+            if let Some(sidecar_url) = cfg.gpu_sidecar_url.clone() {
+                tokio::spawn(gpu_sidecar::health_loop(
+                    sidecar_url,
+                    cfg.gpu_count,
+                    cfg.gpu_vram_mib,
+                ));
+            } else {
+                warn!("gpu_count > 0 but ARBOR_RUNNER__GPU_SIDECAR_URL not set — GPU metrics will not be reported");
+            }
+        }
 
         info!(%runner_id, "registered with controller");
 
@@ -191,19 +223,29 @@ async fn self_register(
     firecracker_version: &str,
     cpu_template: &str,
     arch: &str,
+    gpu_model: Option<&str>,
+    gpu_count: u32,
+    gpu_vram_mib: u32,
 ) -> Result<uuid::Uuid> {
     let client = reqwest::Client::new();
     let url    = format!("{}/internal/runners/register", controller_url.trim_end_matches('/'));
 
+    let mut body = serde_json::json!({
+        "runner_class":        runner_class,
+        "address":             advertise_address,
+        "arch":                arch,
+        "firecracker_version": firecracker_version,
+        "cpu_template":        cpu_template,
+        "capacity_slots":      capacity_slots,
+        "gpu_count":           gpu_count,
+        "gpu_vram_mib":        gpu_vram_mib,
+    });
+    if let Some(model) = gpu_model {
+        body["gpu_model"] = serde_json::json!(model);
+    }
+
     let resp = client.post(&url)
-        .json(&serde_json::json!({
-            "runner_class":        runner_class,
-            "address":             advertise_address,
-            "arch":                arch,
-            "firecracker_version": firecracker_version,
-            "cpu_template":        cpu_template,
-            "capacity_slots":      capacity_slots,
-        }))
+        .json(&body)
         .send()
         .await
         .context("POST /internal/runners/register failed")?;

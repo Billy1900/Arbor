@@ -60,9 +60,37 @@ fn validate_runner_class(
                 });
             }
         }
+        "fc-gpu-x86_64-v1" => {
+            if arch != "x86_64" {
+                return Err(ArborError::RunnerArchMismatch {
+                    expected: "x86_64".into(),
+                    got: arch.into(),
+                });
+            }
+            if cpu_template != "T2" {
+                return Err(ArborError::RunnerArchMismatch {
+                    expected: "T2 (required for fc-gpu-x86_64-v1)".into(),
+                    got: cpu_template.into(),
+                });
+            }
+        }
+        "fc-gpu-arm64-v1" => {
+            if arch != "aarch64" {
+                return Err(ArborError::RunnerArchMismatch {
+                    expected: "aarch64".into(),
+                    got: arch.into(),
+                });
+            }
+            if cpu_template != "T2A" {
+                return Err(ArborError::RunnerArchMismatch {
+                    expected: "T2A (required for fc-gpu-arm64-v1)".into(),
+                    got: cpu_template.into(),
+                });
+            }
+        }
         unknown => {
             return Err(ArborError::RunnerArchMismatch {
-                expected: "fc-x86_64-v1 or fc-arm64-v1".into(),
+                expected: "fc-x86_64-v1, fc-arm64-v1, fc-gpu-x86_64-v1, or fc-gpu-arm64-v1".into(),
                 got: unknown.into(),
             });
         }
@@ -93,11 +121,25 @@ struct RegisterRequest {
     firecracker_version: String,
     cpu_template:        String,
     capacity_slots:      u32,
+    // GPU fields (optional — absent on CPU-only runners)
+    #[serde(default)]
+    gpu_model:           Option<String>,
+    #[serde(default)]
+    gpu_count:           u32,
+    #[serde(default)]
+    gpu_vram_mib:        u32,
 }
 
 async fn register(State(st): State<AppState>, Json(req): Json<RegisterRequest>) -> impl IntoResponse {
     if let Err(e) = validate_runner_class(&req.runner_class, &req.arch, &req.cpu_template) {
         return arbor_err(e).into_response();
+    }
+
+    // GPU runner classes must have at least one GPU reported
+    if req.runner_class.starts_with("fc-gpu-") && req.gpu_count == 0 {
+        return arbor_err(ArborError::GpuCapacityExhausted {
+            runner_class: req.runner_class,
+        }).into_response();
     }
 
     let node = RunnerNode {
@@ -111,6 +153,10 @@ async fn register(State(st): State<AppState>, Json(req): Json<RegisterRequest>) 
         used_slots:          0,
         healthy:             true,
         last_heartbeat:      chrono::Utc::now(),
+        gpu_model:           req.gpu_model,
+        gpu_count:           req.gpu_count,
+        gpu_used:            0,
+        gpu_vram_mib:        req.gpu_vram_mib,
     };
     match st.controller.db.upsert_runner(&node).await {
         Ok(()) => (StatusCode::CREATED, Json(serde_json::json!({ "runner_id": node.id }))).into_response(),
