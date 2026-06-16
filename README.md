@@ -5,13 +5,13 @@
 [![Stars](https://img.shields.io/github/stars/Billy1900/Arbor)](https://github.com/Billy1900/Arbor)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen)](https://github.com/Billy1900/Arbor/pulls)
 
-**Checkpoint-native rollout infrastructure for agentic RL.**
+**The execution backend for agentic RL rollouts. Works with VeRL, OpenRLHF, TRL, and any framework that needs isolated parallel environments.**
 
-Arbor is the execution layer for branching coding-agent rollouts: snapshot mid-task, fork into parallel attempts, replay any failure, collect trajectories for training — all inside your own VPC. No SaaS. No credential leaks. No shared entropy between forks.
+Arbor is the checkpoint-native execution layer for coding-agent RL: snapshot mid-task, fork N independent attempts (each with fresh entropy, tokens, and credentials), collect per-step trajectories, replay any failure — all inside your own VPC. No SaaS. No credential leaks. No shared PRNG state between forks.
 
 Built in Rust on top of [Firecracker](https://github.com/firecracker-microvm/firecracker).
 
-> *Time-travel infrastructure for coding agents. Fork, replay, and train from real execution states.*
+> *Give your RL rollout workers statistically independent, branch-safe environments with full trajectory visibility — without leaving your VPC.*
 
 ---
 
@@ -26,6 +26,57 @@ Agentic RL over coding tasks — SWE-bench, internal bug benchmarks, multi-step 
 **3. Your training data can't leave your VPC.** Every existing coding sandbox is SaaS-only. Proprietary codebases, internal APIs, and the trajectories you're collecting for fine-tuning can't touch a third-party cloud.
 
 Arbor solves all three.
+
+---
+
+## For agentic RL frameworks
+
+Arbor is designed to be the **execution backend for RL rollout workers** in frameworks like [VeRL](https://github.com/volcengine/verl), [OpenRLHF](https://github.com/OpenRLHF/OpenRLHF), and [TRL](https://github.com/huggingface/trl). It replaces ad-hoc subprocess/Docker spawning with a purpose-built environment that gives your training loop the properties it actually needs.
+
+| RL framework concern | What Arbor provides |
+|---|---|
+| N independent rollouts per batch | Branch-safe fork: each gets fresh entropy, tokens, identity |
+| Reward signal integrity | No shared PRNG state between forks — no silent correlation |
+| Per-step trajectory for credit assignment | M10 trace layer: prompt → tool call → diff → reward, per fork |
+| Training data stays in your VPC | Fully self-hosted — trajectories never leave your cluster |
+| GPU inference during rollouts | Host-mediated sidecar (llama.cpp / vLLM) via `gpu.local` |
+| Scale across many parallel envs | Multi-runner pool, Helm chart, ARM64/Graviton2 support |
+
+### VeRL integration sketch
+
+```python
+# In your VeRL rollout worker — replace environment creation with Arbor forks.
+import httpx
+
+ARBOR = "http://arbor-api:8080"
+
+def rollout_batch(checkpoint_id: str, n: int, reward_cmd: str):
+    # Fork N isolated environments from one snapshot — branch-safe by default.
+    forks = [
+        httpx.post(f"{ARBOR}/v1/checkpoints/{checkpoint_id}/fork",
+                   json={"branch_name": f"attempt-{i}",
+                         "post_restore": {"quarantine": True, "identity_reseal": True}}).json()
+        for i in range(n)
+    ]
+
+    # Run the agent in each fork in parallel; collect outcomes.
+    results = parallel_run([
+        (fork["workspace_id"], reward_cmd) for fork in forks
+    ])
+
+    # Export trajectories as JSONL for PPO/GRPO advantage estimation.
+    trajectories = [
+        httpx.get(f"{ARBOR}/v1/workspaces/{r['workspace_id']}/trajectory").json()
+        for r in results
+    ]
+    return trajectories  # feed directly into your reward model / critic
+```
+
+Each fork in `rollout_batch` boots from the exact same execution state but gets its own PRNG seed, session tokens, and secret grants — so the N rollouts are statistically independent. No application-level coordination required.
+
+### Why this matters for GRPO / PPO
+
+GRPO and PPO with group sampling both estimate the advantage by comparing N rollouts from the same prompt/state. If those rollouts share entropy (which they do with naive Firecracker snapshot reuse), their outputs are correlated — the variance estimator is biased and training is noisy. Arbor's reseal protocol eliminates that correlation at the infrastructure level.
 
 ---
 
